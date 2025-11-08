@@ -1,33 +1,45 @@
-// lib/supabase/server.ts (ĐÃ SỬA)
+// lib/supabase/server.ts (Sửa thêm kiểm tra an toàn)
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
-import { GetServerSidePropsContext } from 'next' // Import type từ next
+import { GetServerSidePropsContext } from 'next'
 
-// Bạn cần truyền context (req, res) vào hàm này
 export function createClient(context: GetServerSidePropsContext) {
+  // Lấy req và res từ context, có thể là undefined trong quá trình build
+  const req = context.req;
+  const res = context.res;
+
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
         get(name: string) {
-          // Đọc cookie từ request (req)
-          return context.req.cookies[name]
+          // Kiểm tra xem req có tồn tại không trước khi đọc cookies
+          if (req && req.cookies) {
+             return req.cookies[name];
+          }
+          return undefined; // Trả về undefined nếu không có request (trong lúc build)
         },
         set(name: string, value: string, options: CookieOptions) {
-          // Ghi cookie vào response (res)
-          context.res.setHeader('Set-Cookie', [
-            (context.res.getHeader('Set-Cookie') as string) ?? '',
-            `${name}=${value}; Path=/; ${Object.entries(options).map(([key, val]) => `${key}=${val}`).join('; ')}`,
-          ])
+          // Kiểm tra xem res có tồn tại không
+          if (res) {
+            // Logic set cookie của bạn
+            res.setHeader('Set-Cookie', [
+              (res.getHeader('Set-Cookie') as string) ?? '',
+              `${name}=${value}; Path=/; ${Object.entries(options).map(([key, val]) => `${key}=${val}`).join('; ')}`,
+            ]);
+          }
         },
         remove(name: string, options: CookieOptions) {
-          // Xóa cookie bằng cách thiết lập Max-Age=0
-          context.res.setHeader('Set-Cookie', [
-            (context.res.getHeader('Set-Cookie') as string) ?? '',
-            `${name}=; Max-Age=0; Path=/; ${Object.entries(options).map(([key, val]) => `${key}=${val}`).join('; ')}`,
-          ])
+          // Kiểm tra xem res có tồn tại không
+          if (res) {
+            // Logic remove cookie của bạn
+            res.setHeader('Set-Cookie', [
+              (res.getHeader('Set-Cookie') as string) ?? '',
+              `${name}=; Max-Age=0; Path=/; ${Object.entries(options).map(([key, val]) => `${key}=${val}`).join('; ')}`,
+            ]);
+          }
         },
       },
     }
-  )
+  );
 }
