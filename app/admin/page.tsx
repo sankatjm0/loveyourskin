@@ -1,120 +1,111 @@
 "use client"
 
-import type React from "react"
-
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import Link from "next/link"
-import { LogOut, Plus, Edit2, Trash2 } from "lucide-react"
-import { products as initialProducts } from "@/lib/products"
+import { LogOut } from "lucide-react"
+import { createClient } from "@/lib/supabase/client"
+import { useRouter } from "next/navigation"
 
 export default function AdminPage() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false)
-  const [password, setPassword] = useState("")
-  const [adminPassword] = useState("admin123") // Demo password - change this!
-  const [products, setProducts] = useState(initialProducts)
-  const [editingId, setEditingId] = useState<number | null>(null)
-  const [showForm, setShowForm] = useState(false)
-  const [formData, setFormData] = useState({
-    name: "",
-    price: 0,
-    category: "",
-    description: "",
-    stock: 0,
-  })
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [orders, setOrders] = useState<any[]>([])
+  const router = useRouter()
 
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (password === adminPassword) {
-      setIsLoggedIn(true)
-      setPassword("")
-    } else {
-      alert("Invalid password")
+  useEffect(() => {
+    checkAuth()
+  }, [])
+
+  async function checkAuth() {
+    const supabase = createClient()
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      router.push("/auth/login")
+      return
+    }
+
+    // Check if admin
+    const { data: adminAccess } = await supabase.from("admin_access").select("is_admin").eq("user_id", user.id).single()
+
+    if (!adminAccess?.is_admin) {
+      router.push("/")
+      return
+    }
+
+    setIsAuthenticated(true)
+    loadOrders()
+    setIsLoading(false)
+  }
+
+  async function loadOrders() {
+    const supabase = createClient()
+
+    const { data } = await supabase
+      .from("orders")
+      .select("*, profiles(email)")
+      .order("created_at", { ascending: false })
+
+    setOrders(data || [])
+  }
+
+  async function updateOrderStatus(orderId: string, status: string) {
+    const supabase = createClient()
+
+    const { error } = await supabase
+      .from("orders")
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq("id", orderId)
+
+    if (!error) {
+      loadOrders()
     }
   }
 
-  const handleAddProduct = () => {
-    setFormData({ name: "", price: 0, category: "", description: "", stock: 0 })
-    setEditingId(null)
-    setShowForm(true)
+  async function handleLogout() {
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    router.push("/")
   }
 
-  const handleEdit = (id: number) => {
-    const product = products.find((p) => p.id === id)
-    if (product) {
-      setFormData({
-        name: product.name,
-        price: product.price,
-        category: product.category,
-        description: product.description,
-        stock: product.stock,
-      })
-      setEditingId(id)
-      setShowForm(true)
-    }
-  }
-
-  const handleSave = () => {
-    if (editingId) {
-      setProducts(products.map((p) => (p.id === editingId ? { ...p, ...formData } : p)))
-    } else {
-      setProducts([
-        ...products,
-        {
-          id: Math.max(...products.map((p) => p.id), 0) + 1,
-          image: "/placeholder.svg",
-          ...formData,
-        },
-      ])
-    }
-    setShowForm(false)
-  }
-
-  const handleDelete = (id: number) => {
-    if (confirm("Are you sure you want to delete this product?")) {
-      setProducts(products.filter((p) => p.id !== id))
-    }
-  }
-
-  if (!isLoggedIn) {
+  if (isLoading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center px-4">
-        <div className="w-full max-w-md">
-          <div className="border border-border rounded-lg p-8 space-y-6">
-            <div>
-              <h1 className="text-3xl font-bold mb-2">Admin Login</h1>
-              <p className="text-muted-foreground">Enter your password to access the admin panel</p>
-            </div>
-
-            <form onSubmit={handleLogin} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">Password</label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Demo: admin123"
-                  className="w-full px-4 py-2 border border-border rounded-lg bg-card focus:outline-none focus:ring-2 focus:ring-primary"
-                />
-              </div>
-              <button
-                type="submit"
-                className="w-full py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:opacity-90 transition"
-              >
-                Login
-              </button>
-            </form>
-
-            <div className="text-sm text-muted-foreground text-center">
-              Demo credentials: password is <span className="font-mono">admin123</span>
-            </div>
-
-            <Link href="/" className="block text-center text-primary hover:underline text-sm">
-              Back to Store
-            </Link>
-          </div>
-        </div>
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <p>Loading...</p>
       </div>
     )
+  }
+
+  if (!isAuthenticated) {
+    return null
+  }
+
+  const stats = {
+    totalOrders: orders.length,
+    pendingOrders: orders.filter((o) => o.status === "pending").length,
+    confirmedOrders: orders.filter((o) => o.status === "confirmed").length,
+    shippingOrders: orders.filter((o) => o.status === "shipping").length,
+    deliveredOrders: orders.filter((o) => o.status === "delivered").length,
+  }
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "pending":
+        return "bg-yellow-100 text-yellow-800"
+      case "confirmed":
+        return "bg-blue-100 text-blue-800"
+      case "shipping":
+        return "bg-purple-100 text-purple-800"
+      case "delivered":
+        return "bg-green-100 text-green-800"
+      case "rejected":
+        return "bg-red-100 text-red-800"
+      default:
+        return "bg-gray-100 text-gray-800"
+    }
   }
 
   return (
@@ -127,7 +118,7 @@ export default function AdminPage() {
             <Link href="/" className="text-sm hover:text-primary transition">
               View Store
             </Link>
-            <button onClick={() => setIsLoggedIn(false)} className="p-2 hover:bg-muted rounded-lg transition">
+            <button onClick={handleLogout} className="p-2 hover:bg-muted rounded-lg transition">
               <LogOut size={20} />
             </button>
           </div>
@@ -136,123 +127,75 @@ export default function AdminPage() {
 
       <div className="max-w-7xl mx-auto px-4 py-12">
         <div className="flex items-center justify-between mb-8">
-          <h2 className="text-3xl font-bold">Products</h2>
-          <button
-            onClick={handleAddProduct}
-            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:opacity-90 transition"
-          >
-            <Plus size={20} />
-            Add Product
-          </button>
+          <h2 className="text-3xl font-bold">Orders</h2>
         </div>
 
-        {/* Product Form */}
-        {showForm && (
-          <div className="border border-border rounded-lg p-6 mb-8 bg-muted/50">
-            <h3 className="text-xl font-bold mb-6">{editingId ? "Edit Product" : "New Product"}</h3>
-            <div className="grid md:grid-cols-2 gap-4">
-              <input
-                type="text"
-                placeholder="Product Name"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                className="px-4 py-2 border border-border rounded-lg bg-card focus:outline-none focus:ring-2 focus:ring-primary"
-              />
-              <input
-                type="number"
-                placeholder="Price"
-                value={formData.price}
-                onChange={(e) => setFormData({ ...formData, price: Number(e.target.value) })}
-                className="px-4 py-2 border border-border rounded-lg bg-card focus:outline-none focus:ring-2 focus:ring-primary"
-              />
-              <input
-                type="text"
-                placeholder="Category"
-                value={formData.category}
-                onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                className="px-4 py-2 border border-border rounded-lg bg-card focus:outline-none focus:ring-2 focus:ring-primary"
-              />
-              <input
-                type="number"
-                placeholder="Stock"
-                value={formData.stock}
-                onChange={(e) => setFormData({ ...formData, stock: Number(e.target.value) })}
-                className="px-4 py-2 border border-border rounded-lg bg-card focus:outline-none focus:ring-2 focus:ring-primary"
-              />
-              <textarea
-                placeholder="Description"
-                value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                className="md:col-span-2 px-4 py-2 border border-border rounded-lg bg-card focus:outline-none focus:ring-2 focus:ring-primary"
-                rows={3}
-              />
-            </div>
-            <div className="flex gap-4 mt-6">
-              <button
-                onClick={handleSave}
-                className="px-6 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:opacity-90 transition"
-              >
-                Save
-              </button>
-              <button
-                onClick={() => setShowForm(false)}
-                className="px-6 py-2 border border-border rounded-lg font-medium hover:bg-muted transition"
-              >
-                Cancel
-              </button>
-            </div>
+        {/* Stats */}
+        <div className="grid md:grid-cols-5 gap-4 mb-12">
+          <div className="border border-border rounded-lg p-4">
+            <p className="text-sm text-muted-foreground">Total Orders</p>
+            <p className="text-3xl font-bold">{stats.totalOrders}</p>
           </div>
-        )}
+          <div className="border border-border rounded-lg p-4">
+            <p className="text-sm text-muted-foreground">Pending</p>
+            <p className="text-3xl font-bold text-yellow-600">{stats.pendingOrders}</p>
+          </div>
+          <div className="border border-border rounded-lg p-4">
+            <p className="text-sm text-muted-foreground">Confirmed</p>
+            <p className="text-3xl font-bold text-blue-600">{stats.confirmedOrders}</p>
+          </div>
+          <div className="border border-border rounded-lg p-4">
+            <p className="text-sm text-muted-foreground">Shipping</p>
+            <p className="text-3xl font-bold text-purple-600">{stats.shippingOrders}</p>
+          </div>
+          <div className="border border-border rounded-lg p-4">
+            <p className="text-sm text-muted-foreground">Delivered</p>
+            <p className="text-3xl font-bold text-green-600">{stats.deliveredOrders}</p>
+          </div>
+        </div>
 
-        {/* Products Table */}
+        {/* Orders Table */}
         <div className="border border-border rounded-lg overflow-hidden">
           <table className="w-full">
             <thead>
               <tr className="border-b border-border bg-muted">
-                <th className="px-6 py-4 text-left font-semibold">Product</th>
-                <th className="px-6 py-4 text-left font-semibold">Category</th>
-                <th className="px-6 py-4 text-left font-semibold">Price</th>
-                <th className="px-6 py-4 text-left font-semibold">Stock</th>
-                <th className="px-6 py-4 text-right font-semibold">Actions</th>
+                <th className="px-6 py-4 text-left font-semibold">Order #</th>
+                <th className="px-6 py-4 text-left font-semibold">Customer</th>
+                <th className="px-6 py-4 text-left font-semibold">Amount</th>
+                <th className="px-6 py-4 text-left font-semibold">Status</th>
+                <th className="px-6 py-4 text-left font-semibold">Payment</th>
+                <th className="px-6 py-4 text-left font-semibold">Action</th>
               </tr>
             </thead>
             <tbody>
-              {products.map((product) => (
-                <tr key={product.id} className="border-b border-border hover:bg-muted/50 transition">
-                  <td className="px-6 py-4">{product.name}</td>
-                  <td className="px-6 py-4">{product.category}</td>
-                  <td className="px-6 py-4 font-bold text-primary">${product.price}</td>
+              {orders.map((order) => (
+                <tr key={order.id} className="border-b border-border hover:bg-muted/50 transition">
+                  <td className="px-6 py-4 font-mono text-sm">{order.order_number}</td>
+                  <td className="px-6 py-4 text-sm">{order.profiles?.email}</td>
+                  <td className="px-6 py-4 font-bold">${order.total_amount.toFixed(2)}</td>
                   <td className="px-6 py-4">
-                    <span
-                      className={`px-3 py-1 rounded text-sm ${
-                        product.stock > 0 ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
-                      }`}
-                    >
-                      {product.stock}
+                    <span className={`px-3 py-1 rounded text-sm font-medium ${getStatusColor(order.status)}`}>
+                      {order.status}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-right flex justify-end gap-2">
-                    <button onClick={() => handleEdit(product.id)} className="p-2 hover:bg-muted rounded-lg transition">
-                      <Edit2 size={18} />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(product.id)}
-                      className="p-2 hover:bg-red-100 text-red-600 rounded-lg transition"
+                  <td className="px-6 py-4 text-sm capitalize">{order.payment_status}</td>
+                  <td className="px-6 py-4">
+                    <select
+                      value={order.status}
+                      onChange={(e) => updateOrderStatus(order.id, e.target.value)}
+                      className="px-3 py-1 border border-border rounded text-sm"
                     >
-                      <Trash2 size={18} />
-                    </button>
+                      <option value="pending">Pending</option>
+                      <option value="confirmed">Confirmed</option>
+                      <option value="shipping">Shipping</option>
+                      <option value="delivered">Delivered</option>
+                      <option value="rejected">Rejected</option>
+                    </select>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </div>
-
-        <div className="mt-8 p-6 bg-blue-50 border border-blue-200 rounded-lg">
-          <p className="text-sm text-blue-800">
-            <strong>Demo Note:</strong> This is a demo admin panel with in-memory storage. Changes will reset on page
-            refresh. To persist data, connect a database.
-          </p>
         </div>
       </div>
     </div>

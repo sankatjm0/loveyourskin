@@ -3,16 +3,17 @@
 import { useState, useMemo } from "react"
 import Link from "next/link"
 import { Search } from "lucide-react"
-import { products } from "@/lib/products"
+import { getProducts } from "@/lib/products"
 
-export default function ProductsPage() {
+export default async function ProductsPage() {
+  const productsData = await getProducts()
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedCategory, setSelectedCategory] = useState("All")
 
-  const categories = ["All", ...new Set(products.map((p) => p.category))]
+  const categories = ["All", ...new Set(productsData.map((p) => p.category))]
 
   const filteredProducts = useMemo(() => {
-    return products.filter((product) => {
+    return productsData.filter((product) => {
       const matchesSearch =
         product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         product.description.toLowerCase().includes(searchTerm.toLowerCase())
@@ -73,7 +74,7 @@ export default function ProductsPage() {
             <Link key={product.id} href={`/products/${product.id}`} className="group">
               <div className="bg-muted rounded-lg overflow-hidden mb-4 aspect-square">
                 <img
-                  src={product.image.startsWith("/") ? product.image : `/public/${product.image}`}
+                  src={product.image_url || "/placeholder.svg?height=400&width=400&query=product"}
                   alt={product.name}
                   className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                 />

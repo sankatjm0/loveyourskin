@@ -6,9 +6,12 @@ import { useState } from "react"
 import Link from "next/link"
 import { useCart } from "@/hooks/use-cart"
 import { ArrowLeft, AlertCircle } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { createClient } from "@/lib/supabase/client"
 
 export default function CheckoutPage() {
   const { cart, total } = useCart()
+  const router = useRouter()
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
@@ -18,13 +21,8 @@ export default function CheckoutPage() {
     city: "",
     state: "",
     zip: "",
-    cardName: "",
-    cardNumber: "",
-    cardExpiry: "",
-    cardCvc: "",
   })
   const [isProcessing, setIsProcessing] = useState(false)
-  const [orderPlaced, setOrderPlaced] = useState(false)
 
   if (cart.length === 0) {
     return (
@@ -63,55 +61,59 @@ export default function CheckoutPage() {
     e.preventDefault()
     setIsProcessing(true)
 
-    // Simulate payment processing
-    await new Promise((resolve) => setTimeout(resolve, 2000))
+    try {
+      const supabase = createClient()
 
-    setOrderPlaced(true)
-    setIsProcessing(false)
-  }
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
 
-  if (orderPlaced) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center px-4">
-        <div className="max-w-md text-center">
-          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
-            <span className="text-3xl">✓</span>
-          </div>
-          <h1 className="text-3xl font-bold mb-4">Order Placed!</h1>
-          <p className="text-muted-foreground mb-8">
-            Thank you for your purchase. A confirmation email has been sent to {formData.email}
-          </p>
-          <div className="bg-muted rounded-lg p-6 mb-8 text-left">
-            <p className="text-sm text-muted-foreground mb-1">Order Total</p>
-            <p className="text-2xl font-bold text-primary mb-4">
-              ${(total * 1.1 + (total > 100 ? 0 : 9.99)).toFixed(2)}
-            </p>
-            <div className="pt-4 border-t border-border space-y-2 text-sm">
-              <p>
-                <span className="text-muted-foreground">Items:</span> {cart.length} products
-              </p>
-              <p>
-                <span className="text-muted-foreground">Shipping:</span> {total > 100 ? "Free" : "$9.99"}
-              </p>
-            </div>
-          </div>
-          <div className="space-y-3">
-            <Link
-              href="/products"
-              className="block w-full py-3 bg-primary text-primary-foreground rounded-lg font-semibold hover:opacity-90 transition"
-            >
-              Continue Shopping
-            </Link>
-            <Link
-              href="/"
-              className="block w-full py-3 border border-primary text-primary rounded-lg font-semibold hover:bg-primary hover:text-primary-foreground transition"
-            >
-              Back to Home
-            </Link>
-          </div>
-        </div>
-      </div>
-    )
+      if (!user) {
+        router.push("/auth/login")
+        return
+      }
+
+      // Create order
+      const orderNumber = `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      const shippingCost = total > 100 ? 0 : 9.99
+      const tax = total * 0.1
+      const finalTotal = total + tax + shippingCost
+
+      const { data: order, error: orderError } = await supabase
+        .from("orders")
+        .insert({
+          user_id: user.id,
+          order_number: orderNumber,
+          status: "pending",
+          payment_status: "pending",
+          total_amount: finalTotal,
+          shipping_address: formData.address,
+          shipping_city: formData.city,
+          shipping_postal_code: formData.zip,
+          shipping_country: formData.state,
+        })
+        .select()
+        .single()
+
+      if (orderError) throw orderError
+
+      // Add order items
+      for (const item of cart) {
+        await supabase.from("order_items").insert({
+          order_id: order.id,
+          product_id: item.id,
+          quantity: item.quantity,
+          price: item.price,
+        })
+      }
+
+      // Redirect to payment
+      router.push(`/payment/${order.id}`)
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Failed to create order")
+    } finally {
+      setIsProcessing(false)
+    }
   }
 
   const finalTotal = total * 1.1 + (total > 100 ? 0 : 9.99)
@@ -223,59 +225,17 @@ export default function CheckoutPage() {
 
               <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg flex gap-3">
                 <AlertCircle size={20} className="text-blue-600 flex-shrink-0 mt-0.5" />
-                <p className="text-sm text-blue-800">
-                  This is a demo checkout. Use card number{" "}
-                  <span className="font-mono font-bold">4242 4242 4242 4242</span> to test the payment.
-                </p>
+                <p className="text-sm text-blue-800">You will be redirected to VNPay to complete payment securely.</p>
               </div>
 
-              <input
-                type="text"
-                name="cardName"
-                placeholder="Cardholder Name"
-                value={formData.cardName}
-                onChange={handleChange}
-                required
-                className="w-full px-4 py-3 border border-border rounded-lg bg-card focus:outline-none focus:ring-2 focus:ring-primary mb-4"
-              />
-              <input
-                type="text"
-                name="cardNumber"
-                placeholder="4242 4242 4242 4242"
-                value={formData.cardNumber}
-                onChange={handleChange}
-                required
-                className="w-full px-4 py-3 border border-border rounded-lg bg-card focus:outline-none focus:ring-2 focus:ring-primary mb-4"
-              />
-              <div className="grid grid-cols-2 gap-4">
-                <input
-                  type="text"
-                  name="cardExpiry"
-                  placeholder="MM/YY"
-                  value={formData.cardExpiry}
-                  onChange={handleChange}
-                  required
-                  className="px-4 py-3 border border-border rounded-lg bg-card focus:outline-none focus:ring-2 focus:ring-primary"
-                />
-                <input
-                  type="text"
-                  name="cardCvc"
-                  placeholder="CVC"
-                  value={formData.cardCvc}
-                  onChange={handleChange}
-                  required
-                  className="px-4 py-3 border border-border rounded-lg bg-card focus:outline-none focus:ring-2 focus:ring-primary"
-                />
-              </div>
+              <button
+                type="submit"
+                disabled={isProcessing}
+                className="w-full py-4 bg-primary text-primary-foreground rounded-lg font-bold text-lg hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isProcessing ? "Processing..." : `Proceed to Payment - $${finalTotal.toFixed(2)}`}
+              </button>
             </div>
-
-            <button
-              type="submit"
-              disabled={isProcessing}
-              className="w-full py-4 bg-primary text-primary-foreground rounded-lg font-bold text-lg hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isProcessing ? "Processing..." : `Pay $${finalTotal.toFixed(2)}`}
-            </button>
           </form>
 
           {/* Order Summary */}

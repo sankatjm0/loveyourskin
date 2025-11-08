@@ -58,7 +58,7 @@ export default function CartPage() {
               {cart.map((item) => (
                 <div key={item.id} className="border border-border rounded-lg p-6 flex gap-6">
                   <img
-                    src={item.image.startsWith("/") ? item.image : `/public/${item.image}`}
+                    src={item.image_url || "/placeholder.svg?height=100&width=100"}
                     alt={item.name}
                     className="w-24 h-24 object-cover rounded-lg"
                   />
