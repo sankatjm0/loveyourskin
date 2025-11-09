@@ -98,13 +98,15 @@ export default function CheckoutPage() {
       if (orderError) throw orderError
 
       // Add order items
-      for (const item of cart) {
-        await supabase.from("order_items").insert({
-          order_id: order.id,
-          product_id: item.id,
-          quantity: item.quantity,
-          price: item.price,
-        })
+      const orderItems = cart.map((item) => ({
+        order_id: order.id,
+        product_id: item.id, // Keep as string (UUID)
+        quantity: item.quantity,
+        price: item.price,
+      }))
+
+      for (const item of orderItems) {
+        await supabase.from("order_items").insert(item)
       }
 
       // Redirect to payment

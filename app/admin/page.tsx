@@ -2,16 +2,59 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { LogOut } from "lucide-react"
+import { LogOut, Plus, Edit, Trash2 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
 
+interface Product {
+  id: string
+  name: string
+  price: number
+  image_url: string
+  category: string
+}
+
+interface User {
+  id: string
+  email: string
+  created_at: string
+}
+
+interface Order {
+  id: string
+  order_number: string
+  status: string
+  payment_status: string
+  total_amount: number
+  profiles?: { email: string }
+  created_at: string
+}
+
 export default function AdminPage() {
+  const [tab, setTab] = useState<"dashboard" | "products" | "users" | "orders">("dashboard")
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
-  const [orders, setOrders] = useState<any[]>([])
   const [error, setError] = useState<string | null>(null)
   const router = useRouter()
+
+  // Products state
+  const [products, setProducts] = useState<Product[]>([])
+  const [showProductForm, setShowProductForm] = useState(false)
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null)
+  const [productForm, setProductForm] = useState({ name: "", price: "", image_url: "", category: "" })
+
+  // Users state
+  const [users, setUsers] = useState<User[]>([])
+
+  // Orders state
+  const [orders, setOrders] = useState<Order[]>([])
+
+  // Stats
+  const [stats, setStats] = useState({
+    totalOrders: 0,
+    pendingOrders: 0,
+    totalRevenue: 0,
+  })
 
   useEffect(() => {
     checkAuth()
@@ -20,7 +63,6 @@ export default function AdminPage() {
   async function checkAuth() {
     try {
       const supabase = createClient()
-
       const {
         data: { user },
       } = await supabase.auth.getUser()
@@ -30,15 +72,11 @@ export default function AdminPage() {
         return
       }
 
-      const { data: adminData, error: adminError } = await supabase
-        .from("admin_access")
-        .select("is_admin")
-        .eq("user_id", user.id)
-        .single()
+      const { data: adminData } = await supabase.from("admin_access").select("is_admin").eq("user_id", user.id).single()
 
       if (adminData?.is_admin) {
         setIsAuthenticated(true)
-        loadOrders()
+        loadAllData()
       } else {
         setError("You do not have admin access")
         setIsLoading(false)
@@ -49,30 +87,98 @@ export default function AdminPage() {
     }
   }
 
-  async function loadOrders() {
+  async function loadAllData() {
     const supabase = createClient()
 
-    const { data, error: loadError } = await supabase
-      .from("orders")
-      .select("*, profiles(email)")
-      .order("created_at", { ascending: false })
+    const [productsRes, usersRes, ordersRes] = await Promise.all([
+      supabase.from("products").select("*"),
+      supabase.from("profiles").select("id, email, created_at"),
+      supabase.from("orders").select("*, profiles(email)").order("created_at", { ascending: false }),
+    ])
 
-    if (!loadError) {
-      setOrders(data || [])
-    }
+    setProducts(productsRes.data || [])
+    setUsers(usersRes.data || [])
+    setOrders(ordersRes.data || [])
+
+    // Calculate stats
+    const totalRevenue = (ordersRes.data || [])
+      .filter((o) => o.payment_status === "completed")
+      .reduce((sum, o) => sum + o.total_amount, 0)
+
+    setStats({
+      totalOrders: ordersRes.data?.length || 0,
+      pendingOrders: (ordersRes.data || []).filter((o) => o.status === "pending").length,
+      totalRevenue,
+    })
+
     setIsLoading(false)
   }
 
-  async function updateOrderStatus(orderId: string, status: string) {
+  async function handleSaveProduct() {
+    if (!productForm.name || !productForm.price || !productForm.image_url) {
+      alert("Please fill all fields")
+      return
+    }
+
     const supabase = createClient()
+    try {
+      if (editingProduct) {
+        const { error } = await supabase
+          .from("products")
+          .update({
+            name: productForm.name,
+            price: Number.parseFloat(productForm.price),
+            image_url: productForm.image_url,
+            category: productForm.category,
+          })
+          .eq("id", editingProduct.id)
 
-    const { error: updateError } = await supabase
-      .from("orders")
-      .update({ status, updated_at: new Date().toISOString() })
-      .eq("id", orderId)
+        if (error) throw error
+      } else {
+        const { error } = await supabase.from("products").insert({
+          name: productForm.name,
+          price: Number.parseFloat(productForm.price),
+          image_url: productForm.image_url,
+          category: productForm.category,
+        })
 
-    if (!updateError) {
-      loadOrders()
+        if (error) throw error
+      }
+
+      setProductForm({ name: "", price: "", image_url: "", category: "" })
+      setEditingProduct(null)
+      setShowProductForm(false)
+      loadAllData()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Error saving product")
+    }
+  }
+
+  async function handleDeleteProduct(id: string) {
+    if (!confirm("Are you sure?")) return
+
+    const supabase = createClient()
+    try {
+      const { error } = await supabase.from("products").delete().eq("id", id)
+      if (error) throw error
+      loadAllData()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Error deleting product")
+    }
+  }
+
+  async function updateOrderStatus(orderId: string, newStatus: string) {
+    const supabase = createClient()
+    try {
+      const { error } = await supabase
+        .from("orders")
+        .update({ status: newStatus, updated_at: new Date().toISOString() })
+        .eq("id", orderId)
+
+      if (error) throw error
+      loadAllData()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Error updating order")
     }
   }
 
@@ -103,17 +209,7 @@ export default function AdminPage() {
     )
   }
 
-  if (!isAuthenticated) {
-    return null
-  }
-
-  const stats = {
-    totalOrders: orders.length,
-    pendingOrders: orders.filter((o) => o.status === "pending").length,
-    confirmedOrders: orders.filter((o) => o.status === "confirmed").length,
-    shippingOrders: orders.filter((o) => o.status === "shipping").length,
-    deliveredOrders: orders.filter((o) => o.status === "delivered").length,
-  }
+  if (!isAuthenticated) return null
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -149,78 +245,226 @@ export default function AdminPage() {
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-4 py-12">
-        <div className="flex items-center justify-between mb-8">
-          <h2 className="text-3xl font-bold">Orders</h2>
+      <div className="max-w-7xl mx-auto px-4 py-8">
+        {/* Tabs */}
+        <div className="flex gap-2 mb-8 border-b border-border">
+          {["dashboard", "products", "users", "orders"].map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t as any)}
+              className={`px-4 py-2 font-medium capitalize border-b-2 transition ${
+                tab === t
+                  ? "border-primary text-primary"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {t}
+            </button>
+          ))}
         </div>
 
-        {/* Stats */}
-        <div className="grid md:grid-cols-5 gap-4 mb-12">
-          <div className="border border-border rounded-lg p-4">
-            <p className="text-sm text-muted-foreground">Total Orders</p>
-            <p className="text-3xl font-bold">{stats.totalOrders}</p>
+        {/* Dashboard Tab */}
+        {tab === "dashboard" && (
+          <div className="grid md:grid-cols-3 gap-4 mb-8">
+            <div className="border border-border rounded-lg p-6">
+              <p className="text-sm text-muted-foreground">Total Orders</p>
+              <p className="text-3xl font-bold">{stats.totalOrders}</p>
+            </div>
+            <div className="border border-border rounded-lg p-6">
+              <p className="text-sm text-muted-foreground">Pending Orders</p>
+              <p className="text-3xl font-bold text-yellow-600">{stats.pendingOrders}</p>
+            </div>
+            <div className="border border-border rounded-lg p-6">
+              <p className="text-sm text-muted-foreground">Total Revenue</p>
+              <p className="text-3xl font-bold text-green-600">${stats.totalRevenue.toFixed(2)}</p>
+            </div>
           </div>
-          <div className="border border-border rounded-lg p-4">
-            <p className="text-sm text-muted-foreground">Pending</p>
-            <p className="text-3xl font-bold text-yellow-600">{stats.pendingOrders}</p>
-          </div>
-          <div className="border border-border rounded-lg p-4">
-            <p className="text-sm text-muted-foreground">Confirmed</p>
-            <p className="text-3xl font-bold text-blue-600">{stats.confirmedOrders}</p>
-          </div>
-          <div className="border border-border rounded-lg p-4">
-            <p className="text-sm text-muted-foreground">Shipping</p>
-            <p className="text-3xl font-bold text-purple-600">{stats.shippingOrders}</p>
-          </div>
-          <div className="border border-border rounded-lg p-4">
-            <p className="text-sm text-muted-foreground">Delivered</p>
-            <p className="text-3xl font-bold text-green-600">{stats.deliveredOrders}</p>
-          </div>
-        </div>
+        )}
 
-        {/* Orders Table */}
-        <div className="border border-border rounded-lg overflow-hidden">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border bg-muted">
-                <th className="px-6 py-4 text-left font-semibold">Order #</th>
-                <th className="px-6 py-4 text-left font-semibold">Customer</th>
-                <th className="px-6 py-4 text-left font-semibold">Amount</th>
-                <th className="px-6 py-4 text-left font-semibold">Status</th>
-                <th className="px-6 py-4 text-left font-semibold">Payment</th>
-                <th className="px-6 py-4 text-left font-semibold">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {orders.map((order) => (
-                <tr key={order.id} className="border-b border-border hover:bg-muted/50 transition">
-                  <td className="px-6 py-4 font-mono text-sm">{order.order_number}</td>
-                  <td className="px-6 py-4 text-sm">{order.profiles?.email}</td>
-                  <td className="px-6 py-4 font-bold">${order.total_amount.toFixed(2)}</td>
-                  <td className="px-6 py-4">
-                    <span className={`px-3 py-1 rounded text-sm font-medium ${getStatusColor(order.status)}`}>
-                      {order.status}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-sm capitalize">{order.payment_status}</td>
-                  <td className="px-6 py-4">
-                    <select
-                      value={order.status}
-                      onChange={(e) => updateOrderStatus(order.id, e.target.value)}
-                      className="px-3 py-1 border border-border rounded text-sm"
+        {/* Products Tab */}
+        {tab === "products" && (
+          <div>
+            <button
+              onClick={() => {
+                setEditingProduct(null)
+                setProductForm({ name: "", price: "", image_url: "", category: "" })
+                setShowProductForm(!showProductForm)
+              }}
+              className="mb-6 flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:opacity-90"
+            >
+              <Plus size={18} /> Add Product
+            </button>
+
+            {showProductForm && (
+              <div className="border border-border rounded-lg p-6 mb-8 bg-muted/50">
+                <h3 className="text-xl font-bold mb-4">{editingProduct ? "Edit Product" : "Add New Product"}</h3>
+                <div className="space-y-4">
+                  <input
+                    type="text"
+                    placeholder="Product Name"
+                    value={productForm.name}
+                    onChange={(e) => setProductForm({ ...productForm, name: e.target.value })}
+                    className="w-full px-4 py-2 border border-border rounded-lg"
+                  />
+                  <input
+                    type="number"
+                    placeholder="Price"
+                    value={productForm.price}
+                    onChange={(e) => setProductForm({ ...productForm, price: e.target.value })}
+                    className="w-full px-4 py-2 border border-border rounded-lg"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Image URL"
+                    value={productForm.image_url}
+                    onChange={(e) => setProductForm({ ...productForm, image_url: e.target.value })}
+                    className="w-full px-4 py-2 border border-border rounded-lg"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Category"
+                    value={productForm.category}
+                    onChange={(e) => setProductForm({ ...productForm, category: e.target.value })}
+                    className="w-full px-4 py-2 border border-border rounded-lg"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleSaveProduct}
+                      className="px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:opacity-90"
                     >
-                      <option value="pending">Pending</option>
-                      <option value="confirmed">Confirmed</option>
-                      <option value="shipping">Shipping</option>
-                      <option value="delivered">Delivered</option>
-                      <option value="rejected">Rejected</option>
-                    </select>
-                  </td>
-                </tr>
+                      Save
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowProductForm(false)
+                        setEditingProduct(null)
+                      }}
+                      className="px-4 py-2 border border-border rounded-lg font-medium hover:bg-muted"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {products.map((product) => (
+                <div key={product.id} className="border border-border rounded-lg overflow-hidden">
+                  <img
+                    src={product.image_url || "/placeholder.svg"}
+                    alt={product.name}
+                    className="w-full h-48 object-cover"
+                  />
+                  <div className="p-4">
+                    <h3 className="font-semibold mb-2">{product.name}</h3>
+                    <p className="text-sm text-muted-foreground mb-3">${product.price}</p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          setEditingProduct(product)
+                          setProductForm({
+                            name: product.name,
+                            price: product.price.toString(),
+                            image_url: product.image_url,
+                            category: product.category,
+                          })
+                          setShowProductForm(true)
+                        }}
+                        className="flex-1 p-2 border border-border rounded hover:bg-muted transition flex items-center justify-center gap-1"
+                      >
+                        <Edit size={16} /> Edit
+                      </button>
+                      <button
+                        onClick={() => handleDeleteProduct(product.id)}
+                        className="flex-1 p-2 border border-red-300 text-red-600 rounded hover:bg-red-50 transition flex items-center justify-center gap-1"
+                      >
+                        <Trash2 size={16} /> Delete
+                      </button>
+                    </div>
+                  </div>
+                </div>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </div>
+          </div>
+        )}
+
+        {/* Users Tab */}
+        {tab === "users" && (
+          <div className="border border-border rounded-lg overflow-hidden">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-border bg-muted">
+                  <th className="px-6 py-4 text-left font-semibold">Email</th>
+                  <th className="px-6 py-4 text-left font-semibold">Joined</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((user) => (
+                  <tr key={user.id} className="border-b border-border hover:bg-muted/50">
+                    <td className="px-6 py-4">{user.email}</td>
+                    <td className="px-6 py-4 text-sm text-muted-foreground">
+                      {new Date(user.created_at).toLocaleDateString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Orders Tab */}
+        {tab === "orders" && (
+          <div className="space-y-4">
+            {orders.map((order) => (
+              <div key={order.id} className="border border-border rounded-lg p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="font-semibold">{order.order_number}</h3>
+                    <p className="text-sm text-muted-foreground">{order.profiles?.email}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-bold">${order.total_amount.toFixed(2)}</p>
+                    <p className="text-sm">{order.payment_status}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 mb-4">
+                  <span className={`px-3 py-1 rounded text-sm font-medium ${getStatusColor(order.status)}`}>
+                    {order.status}
+                  </span>
+                </div>
+
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    onClick={() => updateOrderStatus(order.id, "confirmed")}
+                    className="px-4 py-2 bg-blue-100 text-blue-800 rounded hover:bg-blue-200 transition text-sm font-medium"
+                  >
+                    Xác Nhận
+                  </button>
+                  <button
+                    onClick={() => updateOrderStatus(order.id, "shipping")}
+                    className="px-4 py-2 bg-purple-100 text-purple-800 rounded hover:bg-purple-200 transition text-sm font-medium"
+                  >
+                    Giao Hàng
+                  </button>
+                  <button
+                    onClick={() => updateOrderStatus(order.id, "delivered")}
+                    className="px-4 py-2 bg-green-100 text-green-800 rounded hover:bg-green-200 transition text-sm font-medium"
+                  >
+                    Đã Giao
+                  </button>
+                  <button
+                    onClick={() => updateOrderStatus(order.id, "rejected")}
+                    className="px-4 py-2 bg-red-100 text-red-800 rounded hover:bg-red-200 transition text-sm font-medium"
+                  >
+                    Huỷ Đơn
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )

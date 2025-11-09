@@ -41,11 +41,11 @@ export function useCart() {
     })
   }
 
-  const removeItem = (productId: number) => {
+  const removeItem = (productId: string | number) => {
     setCart((prev) => prev.filter((item) => item.id !== productId))
   }
 
-  const updateQuantity = (productId: number, quantity: number) => {
+  const updateQuantity = (productId: string | number, quantity: number) => {
     if (quantity <= 0) {
       removeItem(productId)
     } else {
