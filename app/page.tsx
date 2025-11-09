@@ -53,6 +53,12 @@ export default function Home() {
             </Link>
           </div>
           <div className="flex items-center gap-4">
+            <Link href="/auth/login" className="text-sm hover:text-primary transition">
+              Login
+            </Link>
+            <Link href="/auth/sign-up" className="text-sm hover:text-primary transition">
+              Sign Up
+            </Link>
             <Link href="/cart" className="p-2 hover:bg-muted rounded-lg transition">
               <ShoppingCart size={20} />
             </Link>

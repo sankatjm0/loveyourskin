@@ -29,9 +29,19 @@ export default function AdminPage() {
     }
 
     // Check if admin
-    const { data: adminAccess } = await supabase.from("admin_access").select("is_admin").eq("user_id", user.id).single()
+    try {
+      const { data: adminAccess } = await supabase
+        .from("admin_access")
+        .select("is_admin")
+        .eq("user_id", user.id)
+        .single()
 
-    if (!adminAccess?.is_admin) {
+      if (!adminAccess?.is_admin) {
+        router.push("/")
+        return
+      }
+    } catch {
+      // Not admin, redirect to home
       router.push("/")
       return
     }
