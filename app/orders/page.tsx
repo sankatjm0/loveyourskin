@@ -1,21 +1,58 @@
-import { getUserOrders } from "@/lib/orders"
-import { createClient } from "@/lib/supabase/server"
+"use client"
+
 import Link from "next/link"
 import { Badge } from "@/components/ui/badge"
-import { redirect } from "next/navigation"
+import { useEffect, useState } from "react"
+import { createClient } from "@/lib/supabase/client"
 
-export default async function OrdersPage() {
-  const supabase = await createClient()
+interface Order {
+  id: string
+  order_number: string
+  status: string
+  payment_status: string
+  total_amount: number
+  created_at: string
+}
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+export default function OrdersPage() {
+  const [orders, setOrders] = useState<Order[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [user, setUser] = useState<any>(null)
 
-  if (!user) {
-    redirect("/auth/login")
+  useEffect(() => {
+    loadOrders()
+  }, [])
+
+  async function loadOrders() {
+    try {
+      const supabase = createClient()
+
+      const {
+        data: { user: currentUser },
+      } = await supabase.auth.getUser()
+
+      if (!currentUser) {
+        window.location.href = "/auth/login"
+        return
+      }
+
+      setUser(currentUser)
+
+      const { data, error } = await supabase
+        .from("orders")
+        .select("*")
+        .eq("user_id", currentUser.id)
+        .order("created_at", { ascending: false })
+
+      if (!error && data) {
+        setOrders(data)
+      }
+    } catch (err) {
+      console.error("Error loading orders:", err)
+    } finally {
+      setIsLoading(false)
+    }
   }
-
-  const orders = await getUserOrders()
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -71,7 +108,11 @@ export default async function OrdersPage() {
       <div className="max-w-7xl mx-auto px-4 py-12">
         <h1 className="text-4xl font-bold mb-12">My Orders</h1>
 
-        {orders.length === 0 ? (
+        {isLoading ? (
+          <div className="text-center py-12 bg-card rounded-lg">
+            <p className="text-muted-foreground mb-4">Loading orders...</p>
+          </div>
+        ) : orders.length === 0 ? (
           <div className="text-center py-12 bg-card rounded-lg">
             <p className="text-muted-foreground mb-4">You haven't placed any orders yet</p>
             <Link

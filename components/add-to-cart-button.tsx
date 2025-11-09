@@ -8,9 +8,11 @@ import { useState } from "react"
 interface AddToCartButtonProps {
   productId: string
   productName: string
+  productPrice: number
+  productImage?: string
 }
 
-export function AddToCartButton({ productId, productName }: AddToCartButtonProps) {
+export function AddToCartButton({ productId, productName, productPrice, productImage }: AddToCartButtonProps) {
   const [isLoading, setIsLoading] = useState(false)
   const router = useRouter()
 
@@ -38,7 +40,8 @@ export function AddToCartButton({ productId, productName }: AddToCartButtonProps
           id: productId,
           name: productName,
           quantity: 1,
-          price: 0,
+          price: productPrice,
+          image: productImage,
         })
       }
 

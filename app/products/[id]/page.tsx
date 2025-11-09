@@ -96,7 +96,12 @@ export default async function ProductPage({
 
               {/* Purchase Section */}
               <div className="border-t border-border pt-8">
-                <AddToCartButton productId={product.id} productName={product.name} />
+                <AddToCartButton
+                  productId={product.id}
+                  productName={product.name}
+                  productPrice={product.price}
+                  productImage={product.image_url}
+                />
               </div>
             </div>
           </div>

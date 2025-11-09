@@ -30,7 +30,13 @@ export default function AdminPage() {
         return
       }
 
-      if (user.user_metadata?.is_admin) {
+      const { data: adminData, error: adminError } = await supabase
+        .from("admin_access")
+        .select("is_admin")
+        .eq("user_id", user.id)
+        .single()
+
+      if (adminData?.is_admin) {
         setIsAuthenticated(true)
         loadOrders()
       } else {

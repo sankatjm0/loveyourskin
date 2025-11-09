@@ -38,6 +38,12 @@ export async function createOrder(data: {
   shipping_city: string
   shipping_postal_code: string
   shipping_country: string
+  cartItems: Array<{
+    id: string
+    name: string
+    quantity: number
+    price: number
+  }>
 }) {
   const supabase = await createClient()
 
@@ -47,7 +53,6 @@ export async function createOrder(data: {
 
   if (!user) throw new Error("User not authenticated")
 
-  // Generate unique order number
   const orderNumber = `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
 
   const { data: order, error } = await supabase
@@ -67,6 +72,20 @@ export async function createOrder(data: {
     .single()
 
   if (error) throw error
+
+  if (data.cartItems && data.cartItems.length > 0) {
+    const orderItems = data.cartItems.map((item) => ({
+      order_id: (order as any).id,
+      product_id: item.id,
+      quantity: item.quantity,
+      price: item.price,
+    }))
+
+    const { error: itemsError } = await supabase.from("order_items").insert(orderItems)
+
+    if (itemsError) throw itemsError
+  }
+
   return order as Order
 }
 
