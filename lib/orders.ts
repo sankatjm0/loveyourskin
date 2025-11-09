@@ -1,3 +1,6 @@
+// This file should only be imported in Server Components or Server Actions
+import "server-only"
+
 import { createClient } from "@/lib/supabase/server"
 
 export interface Order {

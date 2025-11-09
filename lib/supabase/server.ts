@@ -1,45 +1,21 @@
-// lib/supabase/server.ts (Sửa thêm kiểm tra an toàn)
-import { createServerClient, type CookieOptions } from '@supabase/ssr'
-import { GetServerSidePropsContext } from 'next'
+import { createServerClient } from "@supabase/ssr"
+import { cookies } from "next/headers"
 
-export function createClient(context: GetServerSidePropsContext) {
-  // Lấy req và res từ context, có thể là undefined trong quá trình build
-  const req = context.req;
-  const res = context.res;
+export async function createClient() {
+  const cookieStore = await cookies()
 
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get(name: string) {
-          // Kiểm tra xem req có tồn tại không trước khi đọc cookies
-          if (req && req.cookies) {
-             return req.cookies[name];
-          }
-          return undefined; // Trả về undefined nếu không có request (trong lúc build)
-        },
-        set(name: string, value: string, options: CookieOptions) {
-          // Kiểm tra xem res có tồn tại không
-          if (res) {
-            // Logic set cookie của bạn
-            res.setHeader('Set-Cookie', [
-              (res.getHeader('Set-Cookie') as string) ?? '',
-              `${name}=${value}; Path=/; ${Object.entries(options).map(([key, val]) => `${key}=${val}`).join('; ')}`,
-            ]);
-          }
-        },
-        remove(name: string, options: CookieOptions) {
-          // Kiểm tra xem res có tồn tại không
-          if (res) {
-            // Logic remove cookie của bạn
-            res.setHeader('Set-Cookie', [
-              (res.getHeader('Set-Cookie') as string) ?? '',
-              `${name}=; Max-Age=0; Path=/; ${Object.entries(options).map(([key, val]) => `${key}=${val}`).join('; ')}`,
-            ]);
-          }
-        },
+  return createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll()
       },
-    }
-  );
+      setAll(cookiesToSet) {
+        try {
+          cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options))
+        } catch {
+          // Ignored - middleware will refresh
+        }
+      },
+    },
+  })
 }

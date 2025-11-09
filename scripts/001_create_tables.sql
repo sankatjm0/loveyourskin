@@ -101,6 +101,25 @@ CREATE POLICY "Users can insert their own orders"
   ON public.orders FOR INSERT
   WITH CHECK (auth.uid() = user_id);
 
+-- Add admin policies to view and update all orders
+CREATE POLICY "Admins can view all orders"
+  ON public.orders FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.admin_access
+      WHERE admin_access.user_id = auth.uid() AND admin_access.is_admin = true
+    )
+  );
+
+CREATE POLICY "Admins can update all orders"
+  ON public.orders FOR UPDATE
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.admin_access
+      WHERE admin_access.user_id = auth.uid() AND admin_access.is_admin = true
+    )
+  );
+
 -- Create order_items table
 CREATE TABLE IF NOT EXISTS public.order_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -123,6 +142,16 @@ CREATE POLICY "Users can view order items from their orders"
     )
   );
 
+-- Add admin policy for order items
+CREATE POLICY "Admins can view all order items"
+  ON public.order_items FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.admin_access
+      WHERE admin_access.user_id = auth.uid() AND admin_access.is_admin = true
+    )
+  );
+
 -- Create admin_access table for admin management
 CREATE TABLE IF NOT EXISTS public.admin_access (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -132,9 +161,10 @@ CREATE TABLE IF NOT EXISTS public.admin_access (
   UNIQUE(user_id)
 );
 
+-- Update admin_access policy to allow admins viewing each other
 ALTER TABLE public.admin_access ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Admins can view admin access"
+CREATE POLICY "Admins can view all admin access"
   ON public.admin_access FOR SELECT
   USING (
     EXISTS (
