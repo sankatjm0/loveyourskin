@@ -10,6 +10,7 @@ export default function AdminPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [orders, setOrders] = useState<any[]>([])
+  const [error, setError] = useState<string | null>(null)
   const router = useRouter()
 
   useEffect(() => {
@@ -17,60 +18,54 @@ export default function AdminPage() {
   }, [])
 
   async function checkAuth() {
-    const supabase = createClient()
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-
-    if (!user) {
-      router.push("/auth/login")
-      return
-    }
-
-    // Check if admin
     try {
-      const { data: adminAccess } = await supabase
-        .from("admin_access")
-        .select("is_admin")
-        .eq("user_id", user.id)
-        .single()
+      const supabase = createClient()
 
-      if (!adminAccess?.is_admin) {
-        router.push("/")
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      if (!user) {
+        router.push("/auth/login")
         return
       }
-    } catch {
-      // Not admin, redirect to home
-      router.push("/")
-      return
-    }
 
-    setIsAuthenticated(true)
-    loadOrders()
-    setIsLoading(false)
+      if (user.user_metadata?.is_admin) {
+        setIsAuthenticated(true)
+        loadOrders()
+      } else {
+        setError("You do not have admin access")
+        setIsLoading(false)
+      }
+    } catch (err) {
+      setError("Authentication failed")
+      setIsLoading(false)
+    }
   }
 
   async function loadOrders() {
     const supabase = createClient()
 
-    const { data } = await supabase
+    const { data, error: loadError } = await supabase
       .from("orders")
       .select("*, profiles(email)")
       .order("created_at", { ascending: false })
 
-    setOrders(data || [])
+    if (!loadError) {
+      setOrders(data || [])
+    }
+    setIsLoading(false)
   }
 
   async function updateOrderStatus(orderId: string, status: string) {
     const supabase = createClient()
 
-    const { error } = await supabase
+    const { error: updateError } = await supabase
       .from("orders")
       .update({ status, updated_at: new Date().toISOString() })
       .eq("id", orderId)
 
-    if (!error) {
+    if (!updateError) {
       loadOrders()
     }
   }
@@ -85,6 +80,19 @@ export default function AdminPage() {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <p>Loading...</p>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-red-600 mb-4">{error}</p>
+          <Link href="/" className="text-primary hover:underline">
+            Back to home
+          </Link>
+        </div>
       </div>
     )
   }

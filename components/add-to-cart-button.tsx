@@ -28,21 +28,23 @@ export function AddToCartButton({ productId, productName }: AddToCartButtonProps
         return
       }
 
-      const { error } = await supabase.from("carts").upsert(
-        {
-          user_id: user.id,
-          product_id: productId,
+      const cart = JSON.parse(localStorage.getItem("cart") || "[]")
+      const existingItem = cart.find((item: any) => item.id === productId)
+
+      if (existingItem) {
+        existingItem.quantity += 1
+      } else {
+        cart.push({
+          id: productId,
+          name: productName,
           quantity: 1,
-        },
-        {
-          onConflict: "user_id,product_id",
-        },
-      )
+          price: 0,
+        })
+      }
 
-      if (error) throw error
-
-      router.refresh()
+      localStorage.setItem("cart", JSON.stringify(cart))
       alert(`${productName} added to cart!`)
+      router.refresh()
     } catch (error: unknown) {
       alert(error instanceof Error ? error.message : "Failed to add to cart")
     } finally {

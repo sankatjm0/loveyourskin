@@ -1,7 +1,36 @@
+"use client"
+
 import Link from "next/link"
-import { ShoppingCart, Menu } from "lucide-react"
+import { ShoppingCart, LogOut } from "lucide-react"
+import { useEffect, useState } from "react"
+import { createClient } from "@/lib/supabase/client"
+import { useRouter } from "next/navigation"
 
 export default function Home() {
+  const [user, setUser] = useState<any>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const router = useRouter()
+
+  useEffect(() => {
+    checkAuth()
+  }, [])
+
+  async function checkAuth() {
+    const supabase = createClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    setUser(user || null)
+    setIsLoading(false)
+  }
+
+  async function handleLogout() {
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    setUser(null)
+    router.refresh()
+  }
+
   const featuredProducts = [
     {
       id: 1,
@@ -53,18 +82,38 @@ export default function Home() {
             </Link>
           </div>
           <div className="flex items-center gap-4">
-            <Link href="/auth/login" className="text-sm hover:text-primary transition">
-              Login
-            </Link>
-            <Link href="/auth/sign-up" className="text-sm hover:text-primary transition">
-              Sign Up
-            </Link>
+            {!isLoading && user ? (
+              <>
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <p className="text-sm font-medium">{user.email}</p>
+                    <Link href="/orders" className="text-xs text-muted-foreground hover:text-primary">
+                      My Orders
+                    </Link>
+                  </div>
+                </div>
+                {user.user_metadata?.is_admin && (
+                  <Link href="/admin" className="text-xs hover:text-primary transition font-medium">
+                    Admin
+                  </Link>
+                )}
+                <button onClick={handleLogout} className="p-2 hover:bg-muted rounded-lg transition">
+                  <LogOut size={20} />
+                </button>
+              </>
+            ) : (
+              <>
+                <Link href="/auth/login" className="text-sm hover:text-primary transition">
+                  Login
+                </Link>
+                <Link href="/auth/sign-up" className="text-sm hover:text-primary transition">
+                  Sign Up
+                </Link>
+              </>
+            )}
             <Link href="/cart" className="p-2 hover:bg-muted rounded-lg transition">
               <ShoppingCart size={20} />
             </Link>
-            <button className="md:hidden p-2 hover:bg-muted rounded-lg transition">
-              <Menu size={20} />
-            </button>
           </div>
         </div>
       </nav>
