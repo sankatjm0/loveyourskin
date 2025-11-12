@@ -10,7 +10,7 @@ import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 
 export default function CheckoutPage() {
-  const { cart, total } = useCart()
+  const { cart, total, clearCart } = useCart()
   const router = useRouter()
   const [formData, setFormData] = useState({
     firstName: "",
@@ -111,6 +111,7 @@ export default function CheckoutPage() {
 
       // Redirect to payment
       router.push(`/payment/${order.id}`)
+      await clearCart()
     } catch (error) {
       alert(error instanceof Error ? error.message : "Failed to create order")
     } finally {

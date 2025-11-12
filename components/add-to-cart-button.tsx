@@ -31,7 +31,14 @@ export function AddToCartButton({ productId, productName, productPrice, productI
       }
 
       const cart = JSON.parse(localStorage.getItem("cart") || "[]")
-      const existingItem = cart.find((item: any) => item.id === productId)
+      const { data: existingItem, error: fetchError } = await supabase
+      .from("carts")
+      .select("*")
+      .eq("user_id", user.id)
+      .eq("product_id", productId)
+      .limit(1)
+
+      if (fetchError) throw fetchError
 
       if (existingItem) {
         existingItem.quantity += 1
@@ -45,7 +52,26 @@ export function AddToCartButton({ productId, productName, productPrice, productI
         })
       }
 
-      localStorage.setItem("cart", JSON.stringify(cart))
+      if (existingItem && existingItem.length > 0) {
+        const existing = existingItem[0]
+        const { error: updateError } = await supabase
+          .from("carts")
+          .update({ quantity: existing.quantity + 1 })
+          .eq("id", existing.id)
+        if (updateError) throw updateError
+      } else {
+        const { error: insertError } = await supabase
+          .from("carts")
+          .insert([
+            {
+              user_id: user.id,
+              product_id: productId,
+              quantity: 1,
+              created_at: new Date().toISOString(),
+            },
+          ])
+        if (insertError) throw insertError
+      }
       alert(`${productName} added to cart!`)
       router.refresh()
     } catch (error: unknown) {
