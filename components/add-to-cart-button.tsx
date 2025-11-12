@@ -30,7 +30,6 @@ export function AddToCartButton({ productId, productName, productPrice, productI
         return
       }
 
-      const cart = JSON.parse(localStorage.getItem("cart") || "[]")
       const { data: existingItem, error: fetchError } = await supabase
       .from("carts")
       .select("*")
@@ -39,18 +38,6 @@ export function AddToCartButton({ productId, productName, productPrice, productI
       .limit(1)
 
       if (fetchError) throw fetchError
-
-      if (existingItem) {
-        existingItem.quantity += 1
-      } else {
-        cart.push({
-          id: productId,
-          name: productName,
-          quantity: 1,
-          price: productPrice,
-          image: productImage,
-        })
-      }
 
       if (existingItem && existingItem.length > 0) {
         const existing = existingItem[0]

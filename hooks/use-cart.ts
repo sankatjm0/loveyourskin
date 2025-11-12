@@ -20,7 +20,6 @@ export function useCart() {
   const [isLoading, setIsLoading] = useState(true)
   const [userId, setUserId] = useState<string | null>(null)
 
-  // 🧩 1️⃣ Lấy user và cart từ DB
   const fetchCart = useCallback(async () => {
     setIsLoading(true)
 
@@ -77,15 +76,12 @@ export function useCart() {
     fetchCart()
   }, [fetchCart])
 
-  // 🧮 Tổng tiền
   const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
 
-  // ➕ Thêm sản phẩm
   const addItem = useCallback(
     async (productId: string, quantity = 1) => {
       if (!userId) return
 
-      // kiểm tra sản phẩm đã có trong cart chưa
       const existing = cart.find((i) => i.product_id === productId)
 
       if (existing) {
@@ -106,7 +102,6 @@ export function useCart() {
     [userId, cart, supabase, fetchCart]
   )
 
-  // 🔄 Cập nhật số lượng
   const updateQuantity = useCallback(
     async (id: string, newQuantity: number) => {
       const item = cart.find((i) => i.id === id)
@@ -118,7 +113,6 @@ export function useCart() {
     [cart, supabase, fetchCart]
   )
 
-  // ❌ Xóa item
   const removeItem = useCallback(
     async (id: string) => {
       await supabase.from("carts").delete().eq("id", id)
@@ -127,7 +121,6 @@ export function useCart() {
     [supabase, fetchCart]
   )
 
-  // 🧹 Xóa toàn bộ cart (sau khi checkout)
   const clearCart = useCallback(async () => {
     if (!userId) return
     await supabase.from("carts").delete().eq("user_id", userId)

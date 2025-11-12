@@ -100,18 +100,22 @@ export default function CheckoutPage() {
       // Add order items
       const orderItems = cart.map((item) => ({
         order_id: order.id,
-        product_id: item.id, // Keep as string (UUID)
+        product_id: item.product_id, // UUID
         quantity: item.quantity,
         price: item.price,
       }))
 
-      for (const item of orderItems) {
-        await supabase.from("order_items").insert(item)
-      }
+      const { error: itemsError } = await supabase
+        .from("order_items")
+        .insert(orderItems)
+
+      if (itemsError) throw itemsError
+
+      await supabase.from("carts").delete().eq("user_id", user.id)
+      clearCart()
 
       // Redirect to payment
       router.push(`/payment/${order.id}`)
-      await clearCart()
     } catch (error) {
       alert(error instanceof Error ? error.message : "Failed to create order")
     } finally {

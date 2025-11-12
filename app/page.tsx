@@ -137,7 +137,7 @@ export default function Home() {
                 Shop Now
               </Link>
               <Link
-                href="#about"
+                href="/about"
                 className="px-8 py-3 border border-primary text-primary rounded-lg font-medium hover:bg-primary hover:text-primary-foreground transition"
               >
                 Learn More

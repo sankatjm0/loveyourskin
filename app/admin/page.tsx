@@ -5,6 +5,7 @@ import Link from "next/link"
 import { LogOut, Plus, Edit, Trash2 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
+import { Modal } from "@/components/Modal";
 
 interface Product {
   id: string
@@ -29,6 +30,7 @@ interface Order {
   profiles?: { email: string }
   created_at: string
 }
+
 
 export default function AdminPage() {
   const [tab, setTab] = useState<"dashboard" | "products" | "users" | "orders">("dashboard")
@@ -55,6 +57,53 @@ export default function AdminPage() {
     pendingOrders: 0,
     totalRevenue: 0,
   })
+
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [userOrders, setUserOrders] = useState<Order[]>([]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // Fetch Users
+  useEffect(() => {
+    const fetchUsers = async () => {
+      const supabase = createClient();
+      const { data, error } = await supabase.from("profiles").select("id, email, created_at");
+      if (error) console.error(error);
+      setUsers(data || []);
+    };
+
+    fetchUsers();
+  }, []);
+
+  // Fetch Orders for Selected User
+  useEffect(() => {
+    if (!selectedUser) return;
+
+    const fetchOrders = async () => {
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("orders")
+        .select("id, order_number, total_amount")
+        .eq("user_id", selectedUser.id); // Assuming the "orders" table has a foreign key "user_id"
+      
+      if (error) console.error(error);
+      setUserOrders(data || []);
+    };
+
+    fetchOrders();
+  }, [selectedUser]);
+
+  // Open Modal with User Details and Orders
+  const openUserModal = (user: User) => {
+    setSelectedUser(user);
+    setIsModalOpen(true);
+  };
+
+  // Close Modal
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setSelectedUser(null);
+    setUserOrders([]);
+  };
 
   useEffect(() => {
     checkAuth()
@@ -397,6 +446,7 @@ export default function AdminPage() {
                 <tr className="border-b border-border bg-muted">
                   <th className="px-6 py-4 text-left font-semibold">Email</th>
                   <th className="px-6 py-4 text-left font-semibold">Joined</th>
+                  <th className="px-6 py-4 text-left">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -406,10 +456,41 @@ export default function AdminPage() {
                     <td className="px-6 py-4 text-sm text-muted-foreground">
                       {new Date(user.created_at).toLocaleDateString()}
                     </td>
+                    <td className="px-6 py-4">
+                      <button
+                        onClick={() => openUserModal(user)}
+                        className="text-primary hover:underline"
+                      >
+                        View Orders
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            {isModalOpen && selectedUser && (
+              <Modal onClose={closeModal}>
+                <h3 className="text-xl font-bold mb-4">{selectedUser.email}</h3>
+                <p className="mb-6">Joined on {new Date(selectedUser.created_at).toLocaleDateString()}</p>
+
+                <h4 className="text-lg font-semibold mb-4">Orders</h4>
+                <div className="max-h-60 overflow-y-scroll">
+                  {userOrders.length === 0 ? (
+                    <p>No orders found for this user.</p>
+                  ) : (
+                    <ul>
+                      {userOrders.map((order) => (
+                        <li key={order.id} className="mb-4">
+                          <Link href={`/orders/${order.id}`} className="text-primary">
+                            <p>Order #{order.order_number} - ${order.total_amount.toFixed(2)}</p>
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </Modal>
+            )}
           </div>
         )}
 
