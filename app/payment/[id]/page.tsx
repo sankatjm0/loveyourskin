@@ -4,8 +4,8 @@ import Link from "next/link"
 import { PaymentClient } from "@/components/payment-client"
 import { notFound } from "next/navigation"
 
-export default async function PaymentPage({ params }: { params: { id: string } }) {
-  const { id: orderId } = params
+export default async function PaymentPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id: orderId } = await params
 
   let order
   try {
