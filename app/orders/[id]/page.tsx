@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server"
 import Link from "next/link"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { AdminStatusUpdate } from "@/components/admin-status-update"
 import { redirect } from "next/navigation"
 
 export default async function OrderDetailPage({
@@ -60,6 +61,7 @@ export default async function OrderDetailPage({
               </div>
             </CardHeader>
             <CardContent className="space-y-6">
+              <AdminStatusUpdate orderId={id} currentStatus={order.status} orderNumber={order.order_number} />
               <div>
                 <h3 className="font-semibold mb-4">Order Status Tracking</h3>
                 <div className="flex gap-4">

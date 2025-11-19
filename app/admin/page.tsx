@@ -7,6 +7,7 @@ import { LogOut, Plus, Edit, Trash2 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
 import { Modal } from "@/components/Modal"
+import { Notifications } from "@/components/notifications"
 import { getActiveSlides, uploadSlideImage } from "@/lib/promotions"
 
 // Charts
@@ -30,7 +31,7 @@ interface Product {
   price: number
   image_url: string
   stock: number
-  category: string
+  category?: string
 }
 
 interface User {
@@ -50,7 +51,7 @@ interface Order {
 }
 
 export default function AdminPage() {
-  const [tab, setTab] = useState<"dashboard" | "products" | "users" | "orders" | "promotions">("dashboard")
+  const [tab, setTab] = useState<"dashboard" | "products" | "users" | "orders" | "promotions" | "history">("dashboard")
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -61,7 +62,8 @@ export default function AdminPage() {
   const [showProductForm, setShowProductForm] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [productForm, setProductForm] = useState({ name: "", price: "", image_url: "", stock: "", category: "" })
-  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [imageFiles, setImageFiles] = useState<{ file: File; preview: string }[]>([]) // For preview
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0)
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([])
 
   // Users state
@@ -82,6 +84,8 @@ export default function AdminPage() {
 
   // Promotions state
   const [promotions, setPromotions] = useState<any[]>([])
+  const [promoSlides, setPromoSlides] = useState<any[]>([])
+  const [historyRecords, setHistoryRecords] = useState<any[]>([])
   const [selectedPromotion, setSelectedPromotion] = useState<any | null>(null)
   const [promoForm, setPromoForm] = useState({
     name: "",
@@ -91,32 +95,18 @@ export default function AdminPage() {
     is_active: true,
   })
   const [promoSlidesFiles, setPromoSlidesFiles] = useState<File[]>([])
+  const [promoSlidesPreview, setPromoSlidesPreview] = useState<File[]>([]) // Not yet uploaded
+  const [selectedPromoSlideIndex, setSelectedPromoSlideIndex] = useState(0)
   const [promoSelectedProducts, setPromoSelectedProducts] = useState<Record<string, number>>({}) // productId -> percent
+  const [promoDetailsModalOpen, setPromoDetailsModalOpen] = useState(false)
 
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [debugInfo, setDebugInfo] = useState<{ categoriesLoaded: boolean; usersLoaded: boolean }>(
+    { categoriesLoaded: false, usersLoaded: false }
+  )
 
   // Realtime channel
   const [realtimeChannel, setRealtimeChannel] = useState<any>(null)
-
-  useEffect(() => {
-    const fetchCategories = async () => {
-      const supabase = createClient()
-      const { data, error } = await supabase.from("category").select("id, name")
-      if (error) console.error("fetchCategories", error)
-      setCategories(data || [])
-    }
-    fetchCategories()
-  }, [])
-
-  useEffect(() => {
-    const fetchUsers = async () => {
-      const supabase = createClient()
-      const { data, error } = await supabase.from("profiles").select("id, email, created_at")
-      if (error) console.error(error)
-      setUsers(data || [])
-    }
-    fetchUsers()
-  }, [])
 
   useEffect(() => {
     if (!selectedUser) return
@@ -149,6 +139,42 @@ export default function AdminPage() {
 
       if (adminData?.is_admin) {
         setIsAuthenticated(true)
+        
+        // Fetch categories and users after auth is verified
+        try {
+          console.log("[DEBUG] Fetching categories for authenticated user:", user.id)
+          const { data: catData, error: catError, status } = await supabase.from("category").select("id, name").order("name")
+          console.log("[DEBUG] Category query result:", { status, count: catData?.length, error: catError?.message, data: catData })
+          if (catError) {
+            console.error("fetchCategories error:", catError)
+            setDebugInfo(prev => ({ ...prev, categoriesLoaded: false, categoryError: catError.message }))
+          } else {
+            console.log("Categories loaded successfully:", catData?.length || 0)
+            setCategories(catData || [])
+            setDebugInfo(prev => ({ ...prev, categoriesLoaded: true }))
+          }
+        } catch (err) {
+          console.error("Category fetch exception:", err)
+          setDebugInfo(prev => ({ ...prev, categoriesLoaded: false, categoryError: String(err) }))
+        }
+
+        try {
+          console.log("[DEBUG] Fetching profiles for authenticated user:", user.id)
+          const { data: userData, error: userError, status } = await supabase.from("profiles").select("id, email, created_at").order("created_at", { ascending: false })
+          console.log("[DEBUG] Profiles query result:", { status, count: userData?.length, error: userError?.message, data: userData })
+          if (userError) {
+            console.error("fetchUsers error:", userError)
+            setDebugInfo(prev => ({ ...prev, usersLoaded: false, usersError: userError.message }))
+          } else {
+            console.log("Users loaded successfully:", userData?.length || 0)
+            setUsers(userData || [])
+            setDebugInfo(prev => ({ ...prev, usersLoaded: true }))
+          }
+        } catch (err) {
+          console.error("Users fetch exception:", err)
+          setDebugInfo(prev => ({ ...prev, usersLoaded: false, usersError: String(err) }))
+        }
+
         loadAllData()
       } else {
         setError("You do not have admin access")
@@ -164,17 +190,21 @@ export default function AdminPage() {
     setIsLoading(true)
     const supabase = createClient()
 
-    const [productsRes, usersRes, ordersRes, promotionsRes] = await Promise.all([
+    const [productsRes, usersRes, ordersRes, promotionsRes, slidesRes, historyRes] = await Promise.all([
       supabase.from("products").select("*"),
       supabase.from("profiles").select("id, email, created_at"),
       supabase.from("orders").select("*, profiles(email)").order("created_at", { ascending: false }),
       supabase.from("promotions").select("*").order("created_at", { ascending: false }),
+      supabase.from("promotion_slides").select("*").order("display_order"),
+      supabase.from("history").select("*").order("created_at", { ascending: false }).limit(50),
     ])
 
     setProducts(productsRes.data || [])
     setUsers(usersRes.data || [])
     setOrders(ordersRes.data || [])
     setPromotions(promotionsRes.data || [])
+    setPromoSlides(slidesRes.data || [])
+    setHistoryRecords(historyRes.data || [])
 
     // Calculate stats
     const completedOrders = (ordersRes.data || []).filter((o) => o.status === "delivered")
@@ -206,18 +236,26 @@ export default function AdminPage() {
     }
   }
 
-  async function uploadImage() {
-    if (!imageFile) return null
+  async function uploadImages(files: File[]) {
+    if (files.length === 0) return []
     const supabase = createClient()
-    const fileExt = imageFile.name.split(".").pop()
-    const fileName = `${Date.now()}.${fileExt}`
-    const filePath = `products/${fileName}`
-    const { error: uploadError } = await supabase.storage
-      .from("product_images")
-      .upload(filePath, imageFile, { cacheControl: "3600", upsert: false })
-    if (uploadError) throw uploadError
-    const { data: publicUrl } = supabase.storage.from("product_images").getPublicUrl(filePath)
-    return publicUrl.publicUrl
+    const urls: string[] = []
+    
+    for (const file of files) {
+      try {
+        const fileExt = file.name.split(".").pop()
+        const fileName = `products/${Date.now()}_${Math.random().toString(36).slice(2)}.${fileExt}`
+        const { error: uploadError } = await supabase.storage
+          .from("product_images")
+          .upload(fileName, file, { cacheControl: "3600", upsert: false })
+        if (uploadError) throw uploadError
+        const { data: publicUrl } = supabase.storage.from("product_images").getPublicUrl(fileName)
+        urls.push(publicUrl.publicUrl)
+      } catch (err) {
+        console.error("Image upload error:", err)
+      }
+    }
+    return urls
   }
 
   async function handleSaveProduct() {
@@ -225,18 +263,35 @@ export default function AdminPage() {
       alert("Please fill product name and price")
       return
     }
+    if (!productForm.category) {
+      alert("Please select a category")
+      return
+    }
 
     const supabase = createClient()
     try {
-      let imageUrl = productForm.image_url
-      if (imageFile) imageUrl = await uploadImage()
+      // Upload new images from imageFiles
+      const newImageUrls: string[] = []
+      for (const imgData of imageFiles) {
+        const ext = imgData.file.name.split(".").pop()
+        const fileName = `products/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
+        const { error: uploadError } = await supabase.storage
+          .from("product_images")
+          .upload(fileName, imgData.file, { cacheControl: "3600", upsert: false })
+        if (uploadError) throw uploadError
+        const { data: publicUrl } = supabase.storage.from("product_images").getPublicUrl(fileName)
+        newImageUrls.push(publicUrl.publicUrl)
+      }
+      
+      // First image is cover
+      const coverImage = newImageUrls[0] || productForm.image_url
 
       if (editingProduct) {
         const { error } = await supabase.from("products").update({
           name: productForm.name,
           price: Number.parseFloat(productForm.price),
-          image_url: imageUrl,
-          stock: productForm.stock,
+          image_url: coverImage,
+          stock: Number.parseInt(productForm.stock),
           category: productForm.category,
         }).eq("id", editingProduct.id)
         if (error) throw error
@@ -244,15 +299,16 @@ export default function AdminPage() {
         const { error } = await supabase.from("products").insert({
           name: productForm.name,
           price: Number.parseFloat(productForm.price),
-          image_url: imageUrl,
-          stock: productForm.stock,
+          image_url: coverImage,
+          stock: Number.parseInt(productForm.stock),
           category: productForm.category,
         })
         if (error) throw error
       }
 
       setProductForm({ name: "", price: "", image_url: "", stock: "", category: "" })
-      setImageFile(null)
+      setImageFiles([])
+      setSelectedImageIndex(0)
       setEditingProduct(null)
       setShowProductForm(false)
       loadAllData()
@@ -317,10 +373,19 @@ export default function AdminPage() {
         const ext = file.name.split(".").pop()
         const fileName = `promotions/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
         const { error: uploadError } = await supabase.storage.from("promotion_images").upload(fileName, file)
-        if (uploadError) console.warn("upload slide err", uploadError)
-        const { data: pu } = supabase.storage.from("promotion_images").getPublicUrl(fileName)
-        const imageUrl = pu.publicUrl
-        await supabase.from("promotion_slides").insert({ promotion_id: promoId, image_url: imageUrl })
+        if (uploadError) {
+          console.warn("upload slide err", uploadError)
+          continue
+        }
+        // Get full public URL correctly
+        const { data } = supabase.storage.from("promotion_images").getPublicUrl(fileName)
+        const imageUrl = data.publicUrl // Should be the complete URL with filename
+        
+        const { error: insertErr } = await supabase.from("promotion_slides").insert({ 
+          promotion_id: promoId, 
+          image_url: imageUrl 
+        })
+        if (insertErr) console.warn("insert promotion_slides err", insertErr)
       }
 
       // 3. insert promotion_products for selected products with percent
@@ -343,6 +408,8 @@ export default function AdminPage() {
       // reset form
       setPromoForm({ name: "", mode: "manual", start_at: "", end_at: "", is_active: true })
       setPromoSlidesFiles([])
+      setPromoSlidesPreview([])
+      setSelectedPromoSlideIndex(0)
       setPromoSelectedProducts({})
       loadAllData()
       alert("Promotion created")
@@ -510,6 +577,7 @@ export default function AdminPage() {
         <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
           <h1 className="text-2xl font-bold">Admin Dashboard</h1>
           <div className="flex items-center gap-4">
+            <Notifications isAdmin={true} />
             <Link href="/" className="text-sm hover:text-primary transition">View Store</Link>
             <button onClick={handleLogout} className="p-2 hover:bg-muted rounded-lg transition"><LogOut size={20} /></button>
           </div>
@@ -518,8 +586,8 @@ export default function AdminPage() {
 
       <div className="max-w-7xl mx-auto px-4 py-8">
         {/* Tabs */}
-        <div className="flex gap-2 mb-8 border-b border-border">
-          {["dashboard", "products", "users", "orders", "promotions"].map((t) => (
+        <div className="flex gap-2 mb-8 border-b border-border overflow-x-auto pb-2">
+          {["dashboard", "products", "users", "orders", "promotions", "history"].map((t) => (
             <button key={t} onClick={() => setTab(t as any)} className={`px-4 py-2 font-medium capitalize border-b-2 transition ${tab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{t}</button>
           ))}
         </div>
@@ -595,7 +663,7 @@ export default function AdminPage() {
         {/* Products Tab */}
         {tab === "products" && (
           <div>
-            <button onClick={() => { setEditingProduct(null); setProductForm({ name: "", price: "", image_url: "", stock: "", category: "" }); setShowProductForm(!showProductForm) }} className="mb-6 flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:opacity-90"><Plus size={18} /> Add Product</button>
+            <button onClick={() => { setEditingProduct(null); setProductForm({ name: "", price: "", image_url: "", stock: "", category: "" }); setImageFiles([]); setSelectedImageIndex(0); setShowProductForm(!showProductForm) }} className="mb-6 flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:opacity-90"><Plus size={18} /> Add Product</button>
 
             {showProductForm && (
               <div className="border border-border rounded-lg p-6 mb-8 bg-muted/50">
@@ -604,31 +672,100 @@ export default function AdminPage() {
                   <input type="text" placeholder="Product Name" value={productForm.name} onChange={(e) => setProductForm({ ...productForm, name: e.target.value })} className="w-full px-4 py-2 border border-border rounded-lg" />
                   <input type="number" placeholder="Price" value={productForm.price} onChange={(e) => setProductForm({ ...productForm, price: e.target.value })} className="w-full px-4 py-2 border border-border rounded-lg" />
 
+                  {/* Multiple Images with Preview */}
                   <div>
-                    <label className="text-sm mb-2 block">Image</label>
-                    <input type="file" accept="image/*" onChange={(e) => setImageFile(e.target.files?.[0] || null)} className="w-full" />
-                    <p className="text-xs text-muted-foreground">If you upload an image, it will be saved to Supabase Storage (product_images).</p>
+                    <label className="text-sm mb-2 block font-medium">Product Images (Max 10, first is cover)</label>
+                    <div className="border border-border rounded-lg p-4 bg-white">
+                      {/* Image Preview */}
+                      {imageFiles.length > 0 && (
+                        <div className="mb-4">
+                          <div className="w-full h-64 bg-muted rounded-lg overflow-hidden mb-3">
+                            <img 
+                              src={imageFiles[selectedImageIndex]?.preview} 
+                              alt="preview" 
+                              className="w-full h-full object-cover" 
+                            />
+                          </div>
+                          {/* Image Thumbnails */}
+                          <div className="flex gap-2 overflow-x-auto pb-2">
+                            {imageFiles.map((imgData, idx) => (
+                              <div key={idx} className="relative flex-shrink-0">
+                                <img 
+                                  src={imgData.preview}
+                                  alt={`img-${idx}`}
+                                  onClick={() => setSelectedImageIndex(idx)}
+                                  className={`w-16 h-16 object-cover rounded cursor-pointer border-2 ${selectedImageIndex === idx ? 'border-primary' : 'border-border'}`}
+                                />
+                                <button
+                                  onClick={() => {
+                                    const newFiles = imageFiles.filter((_, i) => i !== idx)
+                                    setImageFiles(newFiles)
+                                    if (selectedImageIndex >= newFiles.length) {
+                                      setSelectedImageIndex(Math.max(0, newFiles.length - 1))
+                                    }
+                                  }}
+                                  className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-bold hover:bg-red-600"
+                                >×</button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      <input 
+                        type="file" 
+                        multiple 
+                        accept="image/*"
+                        onChange={(e) => {
+                          const files = Array.from(e.target.files || [])
+                          const totalImages = imageFiles.length + files.length
+                          if (totalImages > 10) {
+                            alert("Maximum 10 images allowed")
+                            return
+                          }
+                          // Create preview URLs for new files
+                          const newImages = files.map(f => ({
+                            file: f,
+                            preview: URL.createObjectURL(f)
+                          }))
+                          setImageFiles([...imageFiles, ...newImages])
+                        }}
+                        className="w-full"
+                      />
+                      <p className="text-xs text-muted-foreground mt-2">Images will be uploaded when you save. First image becomes the product cover.</p>
+                    </div>
                   </div>
 
-                  <select value={productForm.category} onChange={(e) => setProductForm({ ...productForm, category: e.target.value })} className="w-full px-4 py-2 border border-border rounded-lg">
-                    <option value="">Select Category</option>
-                    {categories.map((c) => (<option key={c.id} value={c.name}>{c.name}</option>))}
-                  </select>
+                  {/* Category Selection */}
+                  <div>
+                    <label className="text-sm mb-2 block font-medium">Category</label>
+                    <select 
+                      value={productForm.category}
+                      onChange={(e) => setProductForm({ ...productForm, category: e.target.value })}
+                      className="w-full px-4 py-2 border border-border rounded-lg"
+                    >
+                      <option value="">Select a category</option>
+                      {categories.map((c) => (
+                        <option key={c.id} value={c.name}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
                   <div>
-                  <input
-                    type="number"
-                    placeholder="Stock Quantity"
-                    value={productForm.stock}
-                    onChange={(e) => setProductForm({ ...productForm, stock: e.target.value })}
-                    className="w-full px-4 py-2 border border-border rounded-lg" 
-                    required
-                  />
-                </div>
+                    <input
+                      type="number"
+                      placeholder="Stock Quantity"
+                      value={productForm.stock}
+                      onChange={(e) => setProductForm({ ...productForm, stock: e.target.value })}
+                      className="w-full px-4 py-2 border border-border rounded-lg" 
+                      required
+                    />
+                  </div>
 
                   <div className="flex gap-2">
                     <button onClick={handleSaveProduct} className="px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:opacity-90">Save</button>
-                    <button onClick={() => { setShowProductForm(false); setEditingProduct(null) }} className="px-4 py-2 border border-border rounded-lg font-medium hover:bg-muted">Cancel</button>
+                    <button onClick={() => { setShowProductForm(false); setEditingProduct(null); setImageFiles([]); setSelectedImageIndex(0) }} className="px-4 py-2 border border-border rounded-lg font-medium hover:bg-muted">Cancel</button>
                   </div>
                 </div>
               </div>
@@ -642,7 +779,7 @@ export default function AdminPage() {
                     <h3 className="font-semibold mb-2">{product.name}</h3>
                     <p className="text-sm text-muted-foreground mb-3">{product.price}VND</p>
                     <div className="flex gap-2">
-                      <button onClick={() => { setEditingProduct(product); setProductForm({ name: product.name, price: product.price.toString(), image_url: product.image_url, stock: product.stock.toString(), category: product.category }); setShowProductForm(true) }} className="flex-1 p-2 border border-border rounded hover:bg-muted transition flex items-center justify-center gap-1"><Edit size={16} /> Edit</button>
+                      <button onClick={() => { setEditingProduct(product); setProductForm({ name: product.name, price: product.price.toString(), image_url: product.image_url, stock: product.stock.toString(), category: product.category || "" }); setImageFiles([]); setSelectedImageIndex(0); setShowProductForm(true) }} className="flex-1 p-2 border border-border rounded hover:bg-muted transition flex items-center justify-center gap-1"><Edit size={16} /> Edit</button>
                       <button onClick={() => handleDeleteProduct(product.id)} className="flex-1 p-2 border border-red-300 text-red-600 rounded hover:bg-red-50 transition flex items-center justify-center gap-1"><Trash2 size={16} /> Delete</button>
                     </div>
                   </div>
@@ -741,83 +878,284 @@ export default function AdminPage() {
           <div>
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-semibold">Promotions</h2>
-              <button onClick={() => { setSelectedPromotion(null); setPromoForm({ name: "", mode: "manual", start_at: "", end_at: "", is_active: true }); setPromoSlidesFiles([]); setPromoSelectedProducts({}) }} className="px-4 py-2 bg-primary text-primary-foreground rounded">New Promotion</button>
+              <button onClick={() => { setSelectedPromotion(null); setPromoForm({ name: "", mode: "manual", start_at: "", end_at: "", is_active: true }); setPromoSlidesFiles([]); setPromoSlidesPreview([]); setSelectedPromoSlideIndex(0); setPromoSelectedProducts({}) }} className="px-4 py-2 bg-primary text-primary-foreground rounded">New Promotion</button>
             </div>
 
-            {/* Promotion form */}
+            {/* Promotion Mode & Schedule Form (before Products)  */}
             <div className="border border-border rounded-lg p-6 mb-6">
+              <h3 className="text-lg font-semibold mb-4">Promotion Settings</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <input placeholder="Promotion name" value={promoForm.name} onChange={(e) => setPromoForm({ ...promoForm, name: e.target.value })} className="px-3 py-2 border border-border rounded" />
                 <div>
                   <label className="mr-3"><input type="radio" name="mode" checked={promoForm.mode === "manual"} onChange={() => setPromoForm({ ...promoForm, mode: "manual" })} /> Manual</label>
                   <label><input type="radio" name="mode" checked={promoForm.mode === "auto"} onChange={() => setPromoForm({ ...promoForm, mode: "auto" })} /> Auto</label>
                 </div>
-
                 {promoForm.mode === "auto" && (
                   <>
-                    <input type="datetime-local" value={promoForm.start_at} onChange={(e) => setPromoForm({ ...promoForm, start_at: e.target.value })} className="px-3 py-2 border border-border rounded" />
-                    <input type="datetime-local" value={promoForm.end_at} onChange={(e) => setPromoForm({ ...promoForm, end_at: e.target.value })} className="px-3 py-2 border border-border rounded" />
+                    <input type="datetime-local" value={promoForm.start_at} onChange={(e) => setPromoForm({ ...promoForm, start_at: e.target.value })} className="px-3 py-2 border border-border rounded" placeholder="Start date" />
+                    <input type="datetime-local" value={promoForm.end_at} onChange={(e) => setPromoForm({ ...promoForm, end_at: e.target.value })} className="px-3 py-2 border border-border rounded" placeholder="End date" />
                   </>
                 )}
-
-                <div className="col-span-1 md:col-span-2">
-                  <label className="block mb-2">Upload slides (multiple)</label>
-                  <input type="file" multiple accept="image/*" onChange={(e) => setPromoSlidesFiles(Array.from(e.target.files || []))} />
-                  <p className="text-xs text-muted-foreground">Uploaded images will be stored in Supabase Storage (promotion_images).</p>
-                </div>
-
-                <div className="col-span-1 md:col-span-2">
-                  <h4 className="font-semibold mb-2">Select products & discount %</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-64 overflow-y-scroll border p-2 rounded">
-                    {products.map(p => (
-                      <div key={p.id} className="flex items-center gap-3">
-                        <input type="checkbox" checked={!!promoSelectedProducts[p.id]} onChange={() => toggleProductSelect(p.id)} />
-                        <div className="flex-1">
-                          <p className="font-medium">{p.name}</p>
-                          <p className="text-sm text-muted-foreground">${p.price}</p>
-                        </div>
-                        <input type="number" min={1} max={90} placeholder="%" value={promoSelectedProducts[p.id] ?? ""} onChange={(e) => setProductDiscount(p.id, Number(e.target.value))} className="w-20 px-2 py-1 border rounded" />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="col-span-1 md:col-span-2 flex gap-2">
-                  <button onClick={handleCreatePromotion} className="px-4 py-2 bg-primary text-primary-foreground rounded">Create Promotion</button>
-                  <button onClick={() => { setPromoForm({ name: "", mode: "manual", start_at: "", end_at: "", is_active: true }); setPromoSlidesFiles([]); setPromoSelectedProducts({}) }} className="px-4 py-2 border rounded">Reset</button>
-                </div>
               </div>
             </div>
 
-            {/* List of promotions */}
+            {/* SEPARATED: Promotion Slides Management */}
+            <div className="border border-border rounded-lg p-6 mb-6">
+              <h3 className="text-lg font-semibold mb-4">Promotion Slides (Max 5)</h3>
+              
+              {/* Existing Slides from Database */}
+              <div className="mb-6">
+                <h4 className="font-medium text-sm mb-3">Current Slides ({promoSlides.length})</h4>
+                {promoSlides.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No slides uploaded yet</p>
+                ) : (
+                  <div className="flex flex-wrap gap-4">
+                    {promoSlides.map((slide) => (
+                      <div key={slide.id} className="relative w-32 h-32 rounded-lg overflow-hidden border border-border group">
+                        <img src={slide.image_url} alt={`slide-${slide.id}`} className="w-full h-full object-cover" />
+                        <button
+                          onClick={async () => {
+                            if (!confirm("Delete this slide?")) return
+                            const supabase = createClient()
+                            try {
+                              // Extract file path from URL for deletion
+                              const urlParts = slide.image_url.split("promotion_images/")
+                              if (urlParts.length > 1) {
+                                const filePath = decodeURIComponent(urlParts[1])
+                                await supabase.storage.from("promotion_images").remove([filePath])
+                              }
+                              // Delete from database
+                              await supabase.from("promotion_slides").delete().eq("id", slide.id)
+                              setPromoSlides(promoSlides.filter(s => s.id !== slide.id))
+                            } catch (err) {
+                              alert(err instanceof Error ? err.message : "Error deleting slide")
+                            }
+                          }}
+                          className="absolute top-1 right-1 bg-red-500 text-white w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition font-bold"
+                        >×</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* New Slides to Upload */}
+              {promoSlides.length < 5 && (
+                <>
+                  <h4 className="font-medium text-sm mb-3">Add New Slides ({promoSlidesFiles.length})</h4>
+                  <div className="flex flex-wrap gap-4 items-center mb-4">
+                    {promoSlidesFiles.length > 0 && promoSlidesFiles.map((file, idx) => (
+                      <div key={idx} className="relative w-32 h-32 rounded-lg overflow-hidden border border-border group">
+                        <img src={URL.createObjectURL(file)} alt={`new-slide-${idx}`} className="w-full h-full object-cover" />
+                        <button
+                          onClick={() => setPromoSlidesFiles(promoSlidesFiles.filter((_, i) => i !== idx))}
+                          className="absolute top-1 right-1 bg-red-500 text-white w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition font-bold"
+                        >×</button>
+                      </div>
+                    ))}
+
+                    {/* Add Slide Button */}
+                    <label className="w-32 h-32 border-2 border-dashed border-border rounded-lg flex items-center justify-center cursor-pointer hover:bg-muted transition">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]
+                          if (file && (promoSlidesFiles.length + promoSlides.length) < 5) {
+                            setPromoSlidesFiles([...promoSlidesFiles, file])
+                          }
+                        }}
+                        className="hidden"
+                      />
+                      <span className="text-3xl text-muted-foreground">+</span>
+                    </label>
+                  </div>
+
+                  <button 
+                    onClick={async () => {
+                      if (promoSlidesFiles.length === 0) {
+                        alert("Please add at least one slide")
+                        return
+                      }
+                      // Upload slides only - independent of promotion
+                      const supabase = createClient()
+                      try {
+                        for (const file of promoSlidesFiles) {
+                          const ext = file.name.split(".").pop()
+                          const fileName = `promotions/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
+                          const { error: uploadError } = await supabase.storage.from("promotion_images").upload(fileName, file)
+                          if (uploadError) throw uploadError
+                          const { data } = supabase.storage.from("promotion_images").getPublicUrl(fileName)
+                          const imageUrl = data.publicUrl
+                          // Insert without linking to a specific promotion
+                          await supabase.from("promotion_slides").insert({ 
+                            image_url: imageUrl,
+                            display_order: promoSlides.length
+                          })
+                        }
+                        alert("Slides uploaded successfully!")
+                        setPromoSlidesFiles([])
+                        loadAllData()
+                      } catch (err) {
+                        alert(err instanceof Error ? err.message : "Error uploading slides")
+                      }
+                    }}
+                    className="px-4 py-2 bg-green-600 text-white rounded font-medium hover:bg-green-700"
+                  >
+                    Upload {promoSlidesFiles.length} Slide{promoSlidesFiles.length !== 1 ? 's' : ''}
+                  </button>
+                </>
+              )}
+            </div>
+
+            {/* SEPARATED: Product Discount Selection */}
+            <div className="border border-border rounded-lg p-6 mb-6">
+              <h3 className="text-lg font-semibold mb-4">Create Promotion with Products</h3>
+              
+              {/* Promotion Name */}
+              <div className="mb-4">
+                <label className="text-sm font-medium block mb-2">Promotion Name</label>
+                <input placeholder="E.g. Summer Sale, Black Friday..." value={promoForm.name} onChange={(e) => setPromoForm({ ...promoForm, name: e.target.value })} className="w-full px-3 py-2 border border-border rounded" />
+              </div>
+
+              {/* Select Products */}
+              <h4 className="font-medium text-sm mb-3">Select Products & Set Discount %</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-64 overflow-y-auto border p-3 rounded bg-muted/30">
+                {products.map(p => (
+                  <div key={p.id} className="flex items-center gap-3 p-2 bg-white rounded border border-border">
+                    <input type="checkbox" checked={!!promoSelectedProducts[p.id]} onChange={() => toggleProductSelect(p.id)} />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm">{p.name}</p>
+                      <p className="text-xs text-muted-foreground">{p.price}VND</p>
+                    </div>
+                    {promoSelectedProducts[p.id] && (
+                      <input type="number" min={1} max={90} placeholder="%" value={promoSelectedProducts[p.id] ?? ""} onChange={(e) => setProductDiscount(p.id, Number(e.target.value))} className="w-16 px-2 py-1 border rounded text-sm" />
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2 mt-4">
+                <button onClick={handleCreatePromotion} className="px-4 py-2 bg-blue-600 text-white rounded font-medium hover:bg-blue-700">Create Promotion (with products)</button>
+                <button onClick={() => { setPromoForm({ name: "", mode: "manual", start_at: "", end_at: "", is_active: true }); setPromoSlidesFiles([]); setPromoSelectedProducts({}) }} className="px-4 py-2 border border-border rounded">Reset</button>
+              </div>
+            </div>
+
+            {/* Promotions List */}
             <div className="grid gap-4">
+              <h3 className="text-lg font-semibold">Active Promotions</h3>
               {promotions.length === 0 ? (<p className="text-sm text-muted-foreground">No promotions yet</p>) : (
                 promotions.map((pr) => (
-                  <div key={pr.id} className="border p-4 rounded flex justify-between items-start">
-                    <div>
-                      <p className="font-semibold">{pr.name}</p>
-                      <p className="text-sm text-muted-foreground">{pr.mode} {pr.mode === "auto" ? `| ${new Date(pr.start_at).toLocaleString()} - ${new Date(pr.end_at).toLocaleString()}` : ""}</p>
+                  <div key={pr.id} className="border p-4 rounded">
+                    <div className="flex justify-between items-start mb-3">
+                      <button onClick={() => { setSelectedPromotion(pr); setPromoDetailsModalOpen(true) }} className="hover:text-primary cursor-pointer">
+                        <p className="font-semibold text-lg">{pr.name}</p>
+                      </button>
+                      <div className="flex gap-2">
+                        <button onClick={async () => {
+                          const supabase = createClient()
+                          const { error } = await supabase.from("promotions").update({ is_active: !pr.is_active }).eq("id", pr.id)
+                          if (error) alert("Error toggling")
+                          else loadAllData()
+                        }} className="px-3 py-2 border rounded text-sm">{pr.is_active ? "Deactivate" : "Activate"}</button>
+                        <button onClick={async () => {
+                          if (!confirm("Delete promotion?")) return
+                          const supabase = createClient()
+                          const { error } = await supabase.from("promotions").delete().eq("id", pr.id)
+                          if (error) alert("Error deleting")
+                          else loadAllData()
+                        }} className="px-3 py-2 border text-red-600 rounded text-sm">Delete</button>
+                      </div>
                     </div>
-                    <div className="flex gap-2">
-                      <button onClick={async () => {
-                        // simple activate/deactivate toggle
-                        const supabase = createClient()
-                        const { error } = await supabase.from("promotions").update({ is_active: !pr.is_active }).eq("id", pr.id)
-                        if (error) alert("Error toggling")
-                        else loadAllData()
-                      }} className="px-3 py-2 border rounded">{pr.is_active ? "Deactivate" : "Activate"}</button>
-                      <button onClick={async () => {
-                        if (!confirm("Delete promotion?")) return
-                        const supabase = createClient()
-                        const { error } = await supabase.from("promotions").delete().eq("id", pr.id)
-                        if (error) alert("Error deleting")
-                        else loadAllData()
-                      }} className="px-3 py-2 border text-red-600 rounded">Delete</button>
-                    </div>
+                    <p className="text-sm text-muted-foreground">{pr.mode === "auto" && pr.start_at ? `${new Date(pr.start_at).toLocaleString()} - ${new Date(pr.end_at).toLocaleString()}` : "Manual"}</p>
                   </div>
                 ))
               )}
             </div>
+
+            {/* Promotion Details Modal */}
+            {promoDetailsModalOpen && selectedPromotion && (
+              <Modal onClose={() => { setPromoDetailsModalOpen(false); setSelectedPromotion(null) }}>
+                <button onClick={() => { setPromoDetailsModalOpen(false); setSelectedPromotion(null) }} className="text-red-600 font-bold mb-4">Close ×</button>
+                <h3 className="text-2xl font-bold mb-4">{selectedPromotion.name}</h3>
+                <p className="text-sm text-muted-foreground mb-6">{selectedPromotion.mode === "auto" ? `Active: ${new Date(selectedPromotion.start_at).toLocaleString()} - ${new Date(selectedPromotion.end_at).toLocaleString()}` : "Manual"}</p>
+                
+                {/* Load and display promotion products */}
+                <h4 className="text-lg font-semibold mb-3">Discounted Products</h4>
+                <div className="space-y-2 max-h-96 overflow-y-auto">
+                  {selectedPromotion.promoProducts && selectedPromotion.promoProducts.length > 0 ? (
+                    selectedPromotion.promoProducts.map((pp: any) => {
+                      const prod = products.find(p => p.id === pp.product_id)
+                      const discountedPrice = prod ? prod.price * (1 - pp.discount_percent / 100) : 0
+                      return (
+                        <div key={pp.product_id} className="border p-3 rounded flex justify-between items-center">
+                          <div>
+                            <p className="font-medium">{prod?.name}</p>
+                            <p className="text-sm text-muted-foreground">Original: {prod?.price}VND</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-green-600 font-bold">{discountedPrice.toFixed(0)}VND</p>
+                            <p className="text-xs text-primary">-{pp.discount_percent}%</p>
+                          </div>
+                        </div>
+                      )
+                    })
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No products in this promotion</p>
+                  )}
+                </div>
+              </Modal>
+            )}
+          </div>
+        )}
+
+        {/* History Tab */}
+        {tab === "history" && (
+          <div>
+            <h2 className="text-2xl font-semibold mb-6">Action History</h2>
+            
+            {historyRecords.length === 0 ? (
+              <div className="text-center py-12 border border-border rounded-lg bg-muted/30">
+                <p className="text-muted-foreground">No history records yet</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {historyRecords.map((record) => {
+                  let icon = "📝"
+                  let typeLabel = ""
+                  let description = ""
+
+                  if (record.type === "product_stock_change") {
+                    icon = "📦"
+                    typeLabel = "Stock Update"
+                    const product = products.find(p => p.id === record.product_id)
+                    description = `${product?.name || "Product"}: Stock changed from ${record.old_value} → ${record.new_value}`
+                  } else if (record.type === "product_created") {
+                    icon = "✨"
+                    typeLabel = "New Product"
+                    const product = products.find(p => p.id === record.product_id)
+                    description = `Added: ${product?.name || "New Product"}`
+                  } else if (record.type === "order_completed") {
+                    icon = "✅"
+                    typeLabel = "Order Completed"
+                    description = record.description || "Order marked as completed"
+                  }
+
+                  return (
+                    <div key={record.id} className="border border-border rounded-lg p-4 hover:bg-muted/50 transition">
+                      <div className="flex gap-4">
+                        <span className="text-2xl">{icon}</span>
+                        <div className="flex-1">
+                          <h3 className="font-semibold text-sm">{typeLabel}</h3>
+                          <p className="text-sm text-muted-foreground">{description}</p>
+                          <p className="text-xs text-muted-foreground mt-2">
+                            {new Date(record.created_at).toLocaleString()}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         )}
 

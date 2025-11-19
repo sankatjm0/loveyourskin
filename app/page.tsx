@@ -5,15 +5,19 @@ import { ShoppingCart, LogOut } from "lucide-react"
 import { useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
-import PromotionCarousel from '@/components/PromotionCarousel'
+import PromoSlider from "@/components/PromoSlider"
+import { Notifications } from "@/components/notifications"
+import { getActivePromotionForProduct } from "@/lib/promotions"
 
 export default function Home() {
   const [user, setUser] = useState<any>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [featuredProducts, setFeaturedProducts] = useState<any[]>([])
   const router = useRouter()
 
   useEffect(() => {
     checkAuth()
+    loadFeaturedProducts()
   }, [])
 
   async function checkAuth() {
@@ -25,43 +29,52 @@ export default function Home() {
     setIsLoading(false)
   }
 
+  async function loadFeaturedProducts() {
+    try {
+      const supabase = createClient()
+      
+      // Fetch all products
+      const { data: products, error } = await supabase.from("products").select("*")
+      
+      if (error || !products) {
+        console.error("Error fetching products:", error)
+        return
+      }
+
+      // Get promotions for each product
+      const productsWithPromos = await Promise.all(
+        products.map(async (product) => {
+          const promo = await getActivePromotionForProduct(product.id)
+          const discountedPrice = promo 
+            ? product.price * (1 - promo.discount_percent / 100)
+            : null
+          
+          return {
+            ...product,
+            discount_percent: promo?.discount_percent || 0,
+            discountedPrice,
+          }
+        })
+      )
+
+      // Sort by discount percentage (highest first) and take top 4
+      const topSalesProducts = productsWithPromos
+        .filter(p => p.discount_percent > 0)
+        .sort((a, b) => b.discount_percent - a.discount_percent)
+        .slice(0, 4)
+
+      setFeaturedProducts(topSalesProducts)
+    } catch (err) {
+      console.error("Error loading featured products:", err)
+    }
+  }
+
   async function handleLogout() {
     const supabase = createClient()
     await supabase.auth.signOut()
     setUser(null)
     router.refresh()
   }
-
-  const featuredProducts = [
-    {
-      id: 1,
-      name: "Minimalist Chair",
-      price: "$299",
-      image: "/modern-minimalist-chair-design.jpg",
-      category: "Furniture",
-    },
-    {
-      id: 2,
-      name: "Nordic Lamp",
-      price: "$149",
-      image: "/modern-nordic-lamp-lighting.jpg",
-      category: "Lighting",
-    },
-    {
-      id: 3,
-      name: "Ceramic Vase",
-      price: "$89",
-      image: "/modern-ceramic-vase-art.jpg",
-      category: "Decor",
-    },
-    {
-      id: 4,
-      name: "Marble Tray",
-      price: "$129",
-      image: "/luxury-marble-serving-tray.jpg",
-      category: "Accessories",
-    },
-  ]
 
   return (
     <div className="min-h-screen bg-background">
@@ -83,6 +96,7 @@ export default function Home() {
             </Link>
           </div>
           <div className="flex items-center gap-4">
+            {!isLoading && user && <Notifications isAdmin={user.user_metadata?.is_admin} />}
             {!isLoading && user ? (
               <>
                 <div className="flex items-center gap-3">
@@ -145,29 +159,52 @@ export default function Home() {
               </Link>
             </div>
           </div>
-          <PromotionCarousel/>
+          <div className="rounded-lg overflow-hidden">
+            <PromoSlider />
+          </div>
         </div>
       </section>
 
-      {/* Featured Products */}
+      {/* Featured Products - Top Sales */}
       <section className="max-w-7xl mx-auto px-4 py-16">
-        <h2 className="text-4xl font-bold mb-12 text-center">Featured Collection</h2>
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
-          {featuredProducts.map((product) => (
-            <Link key={product.id} href={`/products/${product.id}`} className="group">
-              <div className="bg-muted rounded-lg overflow-hidden mb-4 aspect-square">
-                <img
-                  src={product.image || "/placeholder.svg"}
-                  alt={product.name}
-                  className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                />
-              </div>
-              <p className="text-sm text-muted-foreground mb-2">{product.category}</p>
-              <h3 className="text-lg font-semibold mb-2 group-hover:text-primary transition">{product.name}</h3>
-              <p className="text-primary font-bold">{product.price}VND</p>
-            </Link>
-          ))}
-        </div>
+        <h2 className="text-4xl font-bold mb-12 text-center">Flash Sale</h2>
+        
+        {featuredProducts.length === 0 ? (
+          <div className="text-center py-12 bg-muted rounded-lg">
+            <p className="text-lg text-muted-foreground">Theo dõi trang để cập nhật khuyến mãi sớm nhất bạn nhé</p>
+          </div>
+        ) : (
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
+            {featuredProducts.map((product) => (
+              <Link key={product.id} href={`/products/${product.id}`} className="group">
+                <div className="bg-muted rounded-lg overflow-hidden mb-4 aspect-square relative">
+                  <img
+                    src={product.image_url || "/placeholder.svg"}
+                    alt={product.name}
+                    className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                  />
+                  {product.discount_percent > 0 && (
+                    <div className="absolute top-2 right-2 bg-red-500 text-white px-3 py-1 rounded-full text-sm font-bold">
+                      -{product.discount_percent}%
+                    </div>
+                  )}
+                </div>
+                <p className="text-sm text-muted-foreground mb-2">{product.category}</p>
+                <h3 className="text-lg font-semibold mb-2 group-hover:text-primary transition">{product.name}</h3>
+                <div className="flex flex-col gap-1">
+                  {product.discountedPrice ? (
+                    <>
+                      <p className="text-sm line-through text-muted-foreground">{product.price}VND</p>
+                      <p className="text-primary font-bold text-lg">{product.discountedPrice.toFixed(0)}VND</p>
+                    </>
+                  ) : (
+                    <p className="text-primary font-bold">{product.price}VND</p>
+                  )}
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* CTA Section */}
