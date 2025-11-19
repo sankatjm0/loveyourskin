@@ -75,7 +75,7 @@ export default function CheckoutPage() {
 
       // Create order
       const orderNumber = `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-      const shippingCost = total > 100 ? 0 : 9.99
+      const shippingCost = total > 112000 ? 0 : 30000
       const tax = total * 0.1
       const finalTotal = total + tax + shippingCost
 
@@ -123,7 +123,7 @@ export default function CheckoutPage() {
     }
   }
 
-  const finalTotal = total * 1.1 + (total > 100 ? 0 : 9.99)
+  const finalTotal = total * 1.1 + (total > 112000 ? 0 : 30000)
 
   return (
     <div className="min-h-screen bg-background">
@@ -240,7 +240,7 @@ export default function CheckoutPage() {
                 disabled={isProcessing}
                 className="w-full py-4 bg-primary text-primary-foreground rounded-lg font-bold text-lg hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isProcessing ? "Processing..." : `Proceed to Payment - $${finalTotal.toFixed(2)}`}
+                {isProcessing ? "Processing..." : `Proceed to Payment - ${finalTotal.toFixed(2)}VND`}
               </button>
             </div>
           </form>
@@ -256,7 +256,7 @@ export default function CheckoutPage() {
                     <span className="text-muted-foreground">
                       {item.name} <span className="font-medium text-foreground">x{item.quantity}</span>
                     </span>
-                    <span className="font-medium">${(item.price * item.quantity).toFixed(2)}</span>
+                    <span className="font-medium">{(item.price * item.quantity).toFixed(2)}VND</span>
                   </div>
                 ))}
               </div>
@@ -264,23 +264,23 @@ export default function CheckoutPage() {
               <div className="border-t border-border pt-4 space-y-3">
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Subtotal</span>
-                  <span>${total.toFixed(2)}</span>
+                  <span>{total.toFixed(2)}VND</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Shipping</span>
-                  <span className={total > 100 ? "text-green-600 font-medium" : ""}>
-                    {total > 100 ? "FREE" : "$9.99"}
+                  <span className={total > 112000 ? "text-green-600 font-medium" : ""}>
+                    {total > 112000 ? "FREE" : "30.000VND"}
                   </span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Tax (10%)</span>
-                  <span>${(total * 0.1).toFixed(2)}</span>
+                  <span>{(total * 0.1).toFixed(2)}VND</span>
                 </div>
               </div>
 
               <div className="border-t border-border pt-4 flex justify-between items-center text-lg font-bold">
                 <span>Total</span>
-                <span className="text-primary">${finalTotal.toFixed(2)}</span>
+                <span className="text-primary">{finalTotal.toFixed(2)}VND</span>
               </div>
             </div>
           </div>

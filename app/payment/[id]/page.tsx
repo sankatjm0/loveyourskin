@@ -39,7 +39,7 @@ export default async function PaymentPage({ params }: { params: Promise<{ id: st
               </div>
               <div className="flex justify-between">
                 <span>Total Amount</span>
-                <span className="font-semibold">${order.total_amount.toFixed(2)}</span>
+                <span className="font-semibold">{order.total_amount.toFixed(2)}VND</span>
               </div>
               <div className="flex justify-between">
                 <span>Status</span>

@@ -5,6 +5,7 @@ import { ShoppingCart, LogOut } from "lucide-react"
 import { useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
+import PromotionCarousel from '@/components/PromotionCarousel'
 
 export default function Home() {
   const [user, setUser] = useState<any>(null)
@@ -144,11 +145,7 @@ export default function Home() {
               </Link>
             </div>
           </div>
-          <img
-            src="/modern-minimalist-interior-design-premium.jpg"
-            alt="Modern interior design showcase"
-            className="rounded-lg w-full h-full object-cover"
-          />
+          <PromotionCarousel/>
         </div>
       </section>
 
@@ -167,7 +164,7 @@ export default function Home() {
               </div>
               <p className="text-sm text-muted-foreground mb-2">{product.category}</p>
               <h3 className="text-lg font-semibold mb-2 group-hover:text-primary transition">{product.name}</h3>
-              <p className="text-primary font-bold">{product.price}</p>
+              <p className="text-primary font-bold">{product.price}VND</p>
             </Link>
           ))}
         </div>

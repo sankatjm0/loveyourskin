@@ -99,7 +99,7 @@ export default async function OrderDetailPage({
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Total Amount:</span>
-                      <span className="font-semibold">${order.total_amount.toFixed(2)}</span>
+                      <span className="font-semibold">{order.total_amount.toFixed(2)}VND</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Payment Status:</span>

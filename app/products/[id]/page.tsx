@@ -56,11 +56,11 @@ export default async function ProductPage({ params }: { params: { id: string } }
                   {(product as any).discount_percent ? (
                     <>
                       <p className="text-3xl font-bold text-primary">${finalPrice}</p>
-                      <p className="text-lg line-through text-muted-foreground">${product.price}</p>
+                      <p className="text-lg line-through text-muted-foreground">{product.price}VND</p>
                       <span className="px-2 py-1 bg-red-500 text-white text-xs rounded">-{(product as any).discount_percent}%</span>
                     </>
                   ) : (
-                    <p className="text-3xl font-bold text-primary">${product.price}</p>
+                    <p className="text-3xl font-bold text-primary">{product.price}VND</p>
                   )}
 
                   <p className={`text-sm px-3 py-1 rounded ${product.stock > 0 ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>

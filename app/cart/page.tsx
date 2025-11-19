@@ -105,21 +105,21 @@ export default function CartPage() {
                 <div className="space-y-3 py-4 border-t border-b border-border">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Subtotal</span>
-                    <span className="font-medium">${total.toFixed(2)}</span>
+                    <span className="font-medium">{total.toFixed(2)}VND</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Shipping</span>
-                    <span className="font-medium text-green-600">{total > 100 ? "FREE" : "$9.99"}</span>
+                    <span className="font-medium text-green-600">{total > 112000 ? "FREE" : "30000VND"}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Tax</span>
-                    <span className="font-medium">${(total * 0.1).toFixed(2)}</span>
+                    <span className="font-medium">{(total * 0.1).toFixed(2)}VND</span>
                   </div>
                 </div>
 
                 <div className="flex justify-between items-center text-lg font-bold">
                   <span>Total</span>
-                  <span className="text-primary">${(total * 1.1 + (total > 100 ? 0 : 9.99)).toFixed(2)}</span>
+                  <span className="text-primary">{(total * 1.1 + (total > 100 ? 0 : 9.99)).toFixed(2)}VND</span>
                 </div>
 
                 <Link
@@ -136,7 +136,7 @@ export default function CartPage() {
                   Continue Shopping
                 </Link>
 
-                <div className="text-xs text-muted-foreground text-center pt-4">Free shipping on orders over $100</div>
+                <div className="text-xs text-muted-foreground text-center pt-4">Free shipping on orders over 112.000VND</div>
               </div>
             </div>
           </div>

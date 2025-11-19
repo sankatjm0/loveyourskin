@@ -70,7 +70,7 @@ export function ProductsFilters({ products }: ProductsFiltersProps) {
             <p className="text-sm text-muted-foreground mb-2">{product.category}</p>
             <h3 className="text-lg font-semibold mb-2 group-hover:text-primary transition">{product.name}</h3>
             <div className="flex items-center justify-between">
-              <p className="text-primary font-bold">${product.price}</p>
+              <p className="text-primary font-bold">{product.price}VND</p>
               <span
                 className={`text-xs px-2 py-1 rounded ${
                   product.stock > 0 ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"

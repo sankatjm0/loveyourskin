@@ -29,6 +29,7 @@ interface Product {
   name: string
   price: number
   image_url: string
+  stock: number
   category: string
 }
 
@@ -59,7 +60,7 @@ export default function AdminPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [showProductForm, setShowProductForm] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
-  const [productForm, setProductForm] = useState({ name: "", price: "", image_url: "", category: "" })
+  const [productForm, setProductForm] = useState({ name: "", price: "", image_url: "", stock: "", category: "" })
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([])
 
@@ -235,6 +236,7 @@ export default function AdminPage() {
           name: productForm.name,
           price: Number.parseFloat(productForm.price),
           image_url: imageUrl,
+          stock: productForm.stock,
           category: productForm.category,
         }).eq("id", editingProduct.id)
         if (error) throw error
@@ -243,12 +245,13 @@ export default function AdminPage() {
           name: productForm.name,
           price: Number.parseFloat(productForm.price),
           image_url: imageUrl,
+          stock: productForm.stock,
           category: productForm.category,
         })
         if (error) throw error
       }
 
-      setProductForm({ name: "", price: "", image_url: "", category: "" })
+      setProductForm({ name: "", price: "", image_url: "", stock: "", category: "" })
       setImageFile(null)
       setEditingProduct(null)
       setShowProductForm(false)
@@ -409,40 +412,60 @@ export default function AdminPage() {
   const [topProducts, setTopProducts] = useState<{ product_id: string; quantity: number; product?: Product }[]>([])
 
   useEffect(() => {
-    console.log("createClient in admin =", createClient)
-
     const loadTopProducts = async () => {
       const supabase = createClient()
-      // fetch delivered orders ids
-      const ordersRes = await supabase.from("orders").select("id").eq("status", "delivered")
+
+      const ordersRes = await supabase
+        .from("orders")
+        .select("id")
+        .eq("status", "delivered")
+
       const deliveredIds = (ordersRes.data || []).map((o: any) => o.id)
+
       if (deliveredIds.length === 0) {
         setTopProducts([])
         return
       }
+
       const { data, error } = await supabase
         .from("order_items")
         .select("product_id, quantity, products(id, name, image_url)")
         .in("order_id", deliveredIds)
+
       if (error) {
         console.warn("loadTopProducts", error)
         setTopProducts([])
         return
       }
+
       const agg: Record<string, number> = {}
       const productMeta: Record<string, any> = {}
-      (data || []).forEach((row: any) => {
+
+      data?.forEach((row: any) => {
         const pid = row.product_id
         const qty = Number(row.quantity || 0)
+
         agg[pid] = (agg[pid] || 0) + qty
-        if (row.products) productMeta[pid] = row.products
+
+        if (row.products) {
+          productMeta[pid] = row.products
+        }
       })
+
       const arr = Object.entries(agg)
-        .map(([product_id, quantity]) => ({ product_id, quantity, product: productMeta[product_id] || products.find(p => p.id === product_id) }))
+        .map(([product_id, quantity]) => ({
+          product_id,
+          quantity,
+          product:
+            productMeta[product_id] ||
+            products.find((p) => p.id === product_id),
+        }))
         .sort((a, b) => b.quantity - a.quantity)
         .slice(0, 6)
+
       setTopProducts(arr)
     }
+
     loadTopProducts()
   }, [orders, products])
 
@@ -512,7 +535,7 @@ export default function AdminPage() {
 
             <div className="border border-border rounded-lg p-6">
               <p className="text-sm text-muted-foreground">Total Revenue (delivered)</p>
-              <p className="text-3xl font-bold text-green-600">${stats.totalRevenue.toFixed(2)}</p>
+              <p className="text-3xl font-bold text-green-600">{stats.totalRevenue.toFixed(2)}VND</p>
               <p className="text-sm text-muted-foreground mt-2">Last 7 days shown below</p>
             </div>
 
@@ -572,7 +595,7 @@ export default function AdminPage() {
         {/* Products Tab */}
         {tab === "products" && (
           <div>
-            <button onClick={() => { setEditingProduct(null); setProductForm({ name: "", price: "", image_url: "", category: "" }); setShowProductForm(!showProductForm) }} className="mb-6 flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:opacity-90"><Plus size={18} /> Add Product</button>
+            <button onClick={() => { setEditingProduct(null); setProductForm({ name: "", price: "", image_url: "", stock: "", category: "" }); setShowProductForm(!showProductForm) }} className="mb-6 flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:opacity-90"><Plus size={18} /> Add Product</button>
 
             {showProductForm && (
               <div className="border border-border rounded-lg p-6 mb-8 bg-muted/50">
@@ -592,6 +615,17 @@ export default function AdminPage() {
                     {categories.map((c) => (<option key={c.id} value={c.name}>{c.name}</option>))}
                   </select>
 
+                  <div>
+                  <input
+                    type="number"
+                    placeholder="Stock Quantity"
+                    value={productForm.stock}
+                    onChange={(e) => setProductForm({ ...productForm, stock: e.target.value })}
+                    className="w-full px-4 py-2 border border-border rounded-lg" 
+                    required
+                  />
+                </div>
+
                   <div className="flex gap-2">
                     <button onClick={handleSaveProduct} className="px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:opacity-90">Save</button>
                     <button onClick={() => { setShowProductForm(false); setEditingProduct(null) }} className="px-4 py-2 border border-border rounded-lg font-medium hover:bg-muted">Cancel</button>
@@ -606,9 +640,9 @@ export default function AdminPage() {
                   <img src={product.image_url || "/placeholder.svg"} alt={product.name} className="w-full h-48 object-cover" />
                   <div className="p-4">
                     <h3 className="font-semibold mb-2">{product.name}</h3>
-                    <p className="text-sm text-muted-foreground mb-3">${product.price}</p>
+                    <p className="text-sm text-muted-foreground mb-3">{product.price}VND</p>
                     <div className="flex gap-2">
-                      <button onClick={() => { setEditingProduct(product); setProductForm({ name: product.name, price: product.price.toString(), image_url: product.image_url, category: product.category }); setShowProductForm(true) }} className="flex-1 p-2 border border-border rounded hover:bg-muted transition flex items-center justify-center gap-1"><Edit size={16} /> Edit</button>
+                      <button onClick={() => { setEditingProduct(product); setProductForm({ name: product.name, price: product.price.toString(), image_url: product.image_url, stock: product.stock.toString(), category: product.category }); setShowProductForm(true) }} className="flex-1 p-2 border border-border rounded hover:bg-muted transition flex items-center justify-center gap-1"><Edit size={16} /> Edit</button>
                       <button onClick={() => handleDeleteProduct(product.id)} className="flex-1 p-2 border border-red-300 text-red-600 rounded hover:bg-red-50 transition flex items-center justify-center gap-1"><Trash2 size={16} /> Delete</button>
                     </div>
                   </div>
@@ -649,7 +683,7 @@ export default function AdminPage() {
                 <h4 className="text-lg font-semibold mb-4">Orders</h4>
                 <div className="max-h-60 overflow-y-scroll">
                   {userOrders.length === 0 ? (<p>No orders found for this user.</p>) : (
-                    <ul>{userOrders.map((order) => (<li key={order.id} className="mb-4"><Link href={`/admin/order/${order.id}`} className="text-primary"><p>Order #{order.order_number} - ${order.total_amount.toFixed(2)}</p></Link></li>))}</ul>
+                    <ul>{userOrders.map((order) => (<li key={order.id} className="mb-4"><Link href={`/admin/order/${order.id}`} className="text-primary"><p>Order #{order.order_number} - {order.total_amount.toFixed(2)}VND</p></Link></li>))}</ul>
                   )}
                 </div>
               </Modal>
@@ -666,7 +700,7 @@ export default function AdminPage() {
                   <div>
                     <Link href={`/admin/order/${order.id}`}><h3 className="font-semibold">{order.order_number}</h3><p className="text-sm text-muted-foreground">{order.profiles?.email}</p></Link>
                   </div>
-                  <div className="text-right"><p className="font-bold">${order.total_amount.toFixed(2)}</p><p className="text-sm">{order.payment_status}</p></div>
+                  <div className="text-right"><p className="font-bold">{order.total_amount.toFixed(2)}VND</p><p className="text-sm">{order.payment_status}</p></div>
                 </div>
 
                 <div className="flex items-center gap-2 mb-4">
