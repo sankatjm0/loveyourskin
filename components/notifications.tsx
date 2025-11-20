@@ -3,10 +3,12 @@
 import { useEffect, useState } from "react"
 import { Bell, X } from "lucide-react"
 import Link from "next/link"
+import { createClient } from "@/lib/supabase/client"
 
 export interface Notification {
   id: string
-  type: "order_status" | "new_promotion" | "new_order"
+  type: "order_status" | "new_promotion" | "new_order" | "user_message"
+  title: string
   message: string
   link?: string
   read: boolean
@@ -23,41 +25,85 @@ export function Notifications({ isAdmin = false }: NotificationsProps) {
   const [unreadCount, setUnreadCount] = useState(0)
 
   useEffect(() => {
-    // Load notifications from localStorage
-    const loadNotifications = () => {
-      const key = isAdmin ? "admin_notifications" : "user_notifications"
-      const stored = localStorage.getItem(key)
-      if (stored) {
-        try {
-          const parsed = JSON.parse(stored)
-          setNotifications(parsed)
-          setUnreadCount(parsed.filter((n: Notification) => !n.read).length)
-        } catch (e) {
-          console.error("Error parsing notifications:", e)
-        }
-      }
-    }
-
     loadNotifications()
 
-    // Simulate real-time updates (in production, use WebSocket or Supabase Realtime)
+    // Refresh notifications every 5 seconds
     const interval = setInterval(loadNotifications, 5000)
     return () => clearInterval(interval)
   }, [isAdmin])
 
-  const markAsRead = (id: string) => {
-    const updated = notifications.map(n => n.id === id ? { ...n, read: true } : n)
-    setNotifications(updated)
-    const key = isAdmin ? "admin_notifications" : "user_notifications"
-    localStorage.setItem(key, JSON.stringify(updated))
-    setUnreadCount(updated.filter(n => !n.read).length)
+  async function loadNotifications() {
+    try {
+      const supabase = createClient()
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      if (!user) return
+
+      // Fetch user notifications
+      const { data: userNotifs, error: userError } = await supabase
+        .from("notifications")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(50)
+
+      // Fetch admin notifications
+      const { data: adminNotifs, error: adminError } = await supabase
+        .from("notifications")
+        .select("*")
+        .eq("admin_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(50)
+
+      if (userError || adminError) {
+        console.error("Error loading notifications:", userError || adminError)
+        return
+      }
+
+      // Merge and sort by date
+      const allNotifs = [...(userNotifs || []), ...(adminNotifs || [])]
+      allNotifs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      
+      const notifs = allNotifs.slice(0, 50)
+      setNotifications(notifs)
+      setUnreadCount(notifs.filter((n) => !n.read).length)
+    } catch (error) {
+      console.error("Error loading notifications:", error)
+    }
   }
 
-  const deleteNotification = (id: string) => {
-    const updated = notifications.filter(n => n.id !== id)
-    setNotifications(updated)
-    const key = isAdmin ? "admin_notifications" : "user_notifications"
-    localStorage.setItem(key, JSON.stringify(updated))
+  async function markAsRead(id: string) {
+    try {
+      const response = await fetch("/api/notifications", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notificationId: id, read: true }),
+      })
+      if (!response.ok) throw new Error("Failed to mark as read")
+      const updated = notifications.map((n) => (n.id === id ? { ...n, read: true } : n))
+      setNotifications(updated)
+      setUnreadCount(updated.filter((n) => !n.read).length)
+    } catch (error) {
+      console.error("Error marking notification as read:", error)
+    }
+  }
+
+  async function deleteNotification(id: string) {
+    try {
+      const response = await fetch("/api/notifications", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notificationId: id }),
+      })
+      if (!response.ok) throw new Error("Failed to delete notification")
+      const updated = notifications.filter((n) => n.id !== id)
+      setNotifications(updated)
+      setUnreadCount(updated.filter((n) => !n.read).length)
+    } catch (error) {
+      console.error("Error deleting notification:", error)
+    }
   }
 
   return (

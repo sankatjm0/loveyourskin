@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react"
 import { createClient } from "@/lib/supabase/client"
+import { getActivePromotionForProduct } from "@/lib/promotions"
 
 interface CartItem {
   id: string
@@ -11,6 +12,8 @@ interface CartItem {
   image_url?: string
   price: number
   quantity: number
+  discount_percent?: number
+  discount_price?: number
 }
 
 export function useCart() {
@@ -57,15 +60,29 @@ export function useCart() {
       console.error(error)
       setCart([])
     } else {
-      const formatted = data.map((item: any) => ({
-        id: item.id,
-        product_id: item.products.id,
-        name: item.products.name,
-        price: item.products.price,
-        image_url: item.products.image_url,
-        category: item.products.category,
-        quantity: item.quantity,
-      }))
+      const formatted = await Promise.all(
+        data.map(async (item: any) => {
+          // Fetch promotion for this product
+          const promo = await getActivePromotionForProduct(item.products.id)
+          const discount_percent = promo?.discount_percent || 0
+          const originalPrice = item.products.price
+          const discount_price = discount_percent > 0 
+            ? Math.round((originalPrice * (1 - discount_percent / 100)) * 100) / 100
+            : originalPrice
+
+          return {
+            id: item.id,
+            product_id: item.products.id,
+            name: item.products.name,
+            price: originalPrice,
+            image_url: item.products.image_url,
+            category: item.products.category,
+            quantity: item.quantity,
+            discount_percent,
+            discount_price,
+          }
+        })
+      )
       setCart(formatted)
     }
 
@@ -76,7 +93,7 @@ export function useCart() {
     fetchCart()
   }, [fetchCart])
 
-  const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
+  const total = cart.reduce((sum, item) => sum + (item.discount_price || item.price) * item.quantity, 0)
 
   const addItem = useCallback(
     async (productId: string, quantity = 1) => {

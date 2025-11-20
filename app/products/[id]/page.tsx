@@ -40,9 +40,37 @@ export default async function ProductPage({ params }: { params: { id: string } }
           <Link href="/products" className="text-sm hover:text-primary transition flex items-center gap-2 mb-8"><ChevronLeft size={16} /> Back to Products</Link>
 
           <div className="grid md:grid-cols-2 gap-12">
-            {/* Product Image */}
-            <div className="bg-muted rounded-lg overflow-hidden aspect-square">
-              <img src={product.image_url || "/placeholder.svg?height=600&width=600&query=product"} alt={product.name} className="w-full h-full object-cover" />
+            {/* Product Images Gallery */}
+            <div className="flex flex-col gap-4">
+              {/* Main Image */}
+              <div className="bg-muted rounded-lg overflow-hidden aspect-square">
+                <img 
+                  src={product.image_urls && product.image_urls.length > 0 
+                    ? product.image_urls[0] 
+                    : product.image_url || "/placeholder.svg?height=600&width=600&query=product"} 
+                  alt={product.name} 
+                  className="w-full h-full object-cover" 
+                  id="mainImage"
+                />
+              </div>
+              
+              {/* Thumbnail Gallery */}
+              {product.image_urls && product.image_urls.length > 1 && (
+                <div className="flex gap-3 overflow-x-auto pb-2">
+                  {product.image_urls.map((imgUrl, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => {
+                        const img = document.getElementById('mainImage') as HTMLImageElement
+                        if (img) img.src = imgUrl
+                      }}
+                      className="w-20 h-20 flex-shrink-0 border-2 border-border rounded-lg overflow-hidden hover:border-primary transition"
+                    >
+                      <img src={imgUrl} alt={`product-${idx}`} className="w-full h-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Product Details */}
@@ -74,10 +102,26 @@ export default async function ProductPage({ params }: { params: { id: string } }
                 <div className="space-y-4 mb-12">
                   <h3 className="font-semibold text-lg">Features</h3>
                   <ul className="space-y-2 text-muted-foreground">
-                    <li className="flex items-center gap-3"><span className="w-1.5 h-1.5 bg-primary rounded-full"></span>Premium quality materials</li>
-                    <li className="flex items-center gap-3"><span className="w-1.5 h-1.5 bg-primary rounded-full"></span>Modern minimalist design</li>
-                    <li className="flex items-center gap-3"><span className="w-1.5 h-1.5 bg-primary rounded-full"></span>Eco-friendly production</li>
-                    <li className="flex items-center gap-3"><span className="w-1.5 h-1.5 bg-primary rounded-full"></span>Free shipping on orders over $100</li>
+                    {product.details
+                      ? product.details.split("\n").map((feature, index) => (
+                          feature.trim() && (
+                            <li key={index} className="flex items-center gap-3">
+                              <span className="w-1.5 h-1.5 bg-primary rounded-full"></span>
+                              {feature.trim()}
+                            </li>
+                          )
+                        ))
+                      : [
+                          "Premium quality materials",
+                          "Modern minimalist design",
+                          "Eco-friendly production",
+                          "Free shipping on orders over 112000 VND",
+                        ].map((feature, index) => (
+                          <li key={index} className="flex items-center gap-3">
+                            <span className="w-1.5 h-1.5 bg-primary rounded-full"></span>
+                            {feature}
+                          </li>
+                        ))}
                   </ul>
                 </div>
               </div>

@@ -6,7 +6,9 @@ export interface Product {
   price: number
   category: string
   description: string
+  details?: string
   image_url: string
+  image_urls?: string[] // Multiple images
   stock: number
 }
 

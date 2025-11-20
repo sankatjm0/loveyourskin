@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { ShoppingCart, LogOut } from "lucide-react"
+import { ShoppingCart, LogOut, Mail } from "lucide-react"
 import { useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
@@ -99,6 +99,9 @@ export default function Home() {
             {!isLoading && user && <Notifications isAdmin={user.user_metadata?.is_admin} />}
             {!isLoading && user ? (
               <>
+                <Link href="/profile" className="p-2 hover:bg-muted rounded-lg transition" title="View Profile">
+                  <Mail size={20} />
+                </Link>
                 <div className="flex items-center gap-3">
                   <div className="text-right">
                     <p className="text-sm font-medium">{user.email}</p>

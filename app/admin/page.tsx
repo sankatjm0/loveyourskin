@@ -30,8 +30,10 @@ interface Product {
   name: string
   price: number
   image_url: string
+  image_url?: string[]
   stock: number
   category?: string
+  details?: string
 }
 
 interface User {
@@ -61,10 +63,13 @@ export default function AdminPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [showProductForm, setShowProductForm] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
-  const [productForm, setProductForm] = useState({ name: "", price: "", image_url: "", stock: "", category: "" })
+  const [productForm, setProductForm] = useState({ name: "", price: "", image_url: "", stock: "", category: "", categories: [] as string[], details: "" })
   const [imageFiles, setImageFiles] = useState<{ file: File; preview: string }[]>([]) // For preview
   const [selectedImageIndex, setSelectedImageIndex] = useState(0)
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([])
+  const [productPromoMode, setProductPromoMode] = useState<"none" | "manual" | "auto">("none")
+  const [productAutoPromo, setProductAutoPromo] = useState<{ enabled: boolean; discount_percent: number }>({ enabled: false, discount_percent: 0 })
+  const [productManualPromo, setProductManualPromo] = useState<{ enabled: boolean; discount_percent: number }>({ enabled: false, discount_percent: 0 })
 
   // Users state
   const [users, setUsers] = useState<User[]>([])
@@ -81,8 +86,8 @@ export default function AdminPage() {
 
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
   const [userOrders, setUserOrders] = useState<Order[]>([])
-
-  // Promotions state
+  const [userProfileEdit, setUserProfileEdit] = useState({ full_name: "", phone: "", address: "", city: "", postal_code: "", country: "" })
+  const [isEditingUserProfile, setIsEditingUserProfile] = useState(false)
   const [promotions, setPromotions] = useState<any[]>([])
   const [promoSlides, setPromoSlides] = useState<any[]>([])
   const [historyRecords, setHistoryRecords] = useState<any[]>([])
@@ -110,13 +115,26 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (!selectedUser) return
-    const fetchOrders = async () => {
+    const fetchData = async () => {
       const supabase = createClient()
-      const { data, error } = await supabase.from("orders").select("id, order_number, total_amount").eq("user_id", selectedUser.id)
-      if (error) console.error(error)
-      setUserOrders(data || [])
+      // Fetch orders
+      const { data: ordersData, error: ordersError } = await supabase.from("orders").select("id, order_number, total_amount").eq("user_id", selectedUser.id)
+      if (!ordersError) setUserOrders(ordersData || [])
+      
+      // Fetch user profile details
+      const { data: profileData, error: profileError } = await supabase.from("profiles").select("full_name, phone, address, city, postal_code, country").eq("id", selectedUser.id).single()
+      if (!profileError && profileData) {
+        setUserProfileEdit({
+          full_name: profileData.full_name || "",
+          phone: profileData.phone || "",
+          address: profileData.address || "",
+          city: profileData.city || "",
+          postal_code: profileData.postal_code || "",
+          country: profileData.country || ""
+        })
+      }
     }
-    fetchOrders()
+    fetchData()
   }, [selectedUser])
 
   useEffect(() => {
@@ -263,8 +281,8 @@ export default function AdminPage() {
       alert("Please fill product name and price")
       return
     }
-    if (!productForm.category) {
-      alert("Please select a category")
+    if (productForm.categories.length === 0) {
+      alert("Please select at least one category")
       return
     }
 
@@ -285,34 +303,87 @@ export default function AdminPage() {
       
       // First image is cover
       const coverImage = newImageUrls[0] || productForm.image_url
+      const categoryStr = productForm.categories.join(", ") // Join all selected categories
 
+      let savedProduct: any = null
       if (editingProduct) {
-        const { error } = await supabase.from("products").update({
+        const allImageUrls = [...newImageUrls]
+        // If no new images, keep existing ones
+        if (allImageUrls.length === 0 && editingProduct.image_url?.length) {
+          allImageUrls.push(...editingProduct.image_url)
+        }
+        
+        const updateData: any = {
           name: productForm.name,
           price: Number.parseFloat(productForm.price),
-          image_url: coverImage,
+          image_url: coverImage || editingProduct.image_url,
+          image_url: allImageUrls.length > 0 ? allImageUrls : null,
           stock: Number.parseInt(productForm.stock),
-          category: productForm.category,
-        }).eq("id", editingProduct.id)
+          category: categoryStr,
+          details: productForm.details,
+          updated_at: new Date().toISOString(),
+        }
+        console.log("[Product Update] Payload:", updateData)
+        const { error } = await supabase.from("products").update(updateData).eq("id", editingProduct.id)
         if (error) throw error
+        savedProduct = editingProduct // Use existing product as reference
       } else {
-        const { error } = await supabase.from("products").insert({
+        const { data, error } = await supabase.from("products").insert({
           name: productForm.name,
           price: Number.parseFloat(productForm.price),
           image_url: coverImage,
+          image_url: newImageUrls.length > 0 ? newImageUrls : null,
           stock: Number.parseInt(productForm.stock),
-          category: productForm.category,
-        })
+          category: categoryStr,
+          details: productForm.details,
+        }).select()
         if (error) throw error
+        if (!data || data.length === 0) throw new Error("Product creation failed")
+        savedProduct = data[0]
       }
 
-      setProductForm({ name: "", price: "", image_url: "", stock: "", category: "" })
+      // Handle promotions (auto or manual)
+      if (productPromoMode === "auto" && productAutoPromo.discount_percent > 0) {
+        // Create auto promotion
+        const { data: promo, error: promoError } = await supabase
+          .from("promotions")
+          .insert({
+            name: `Auto - ${productForm.name}`,
+            mode: "auto",
+            start_at: new Date().toISOString(),
+            end_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+            is_active: true,
+          })
+          .select()
+          .single()
+
+        if (promoError) throw promoError
+
+        // Link product to promotion
+        const { error: linkError } = await supabase.from("promotion_products").insert({
+          promotion_id: promo.id,
+          product_id: savedProduct.id,
+          discount_percent: productAutoPromo.discount_percent,
+        })
+
+        if (linkError) throw linkError
+      } else if (productPromoMode === "manual" && productManualPromo.discount_percent > 0) {
+        // For manual, we just store the discount_percent for admin to use when creating promotions
+        console.log("Manual promotion mode set - discount %:", productManualPromo.discount_percent)
+      }
+
+      setProductForm({ name: "", price: "", image_url: "", stock: "", category: "", categories: [], details: "" })
       setImageFiles([])
       setSelectedImageIndex(0)
       setEditingProduct(null)
       setShowProductForm(false)
+      setProductPromoMode("none")
+      setProductAutoPromo({ enabled: false, discount_percent: 0 })
+      setProductManualPromo({ enabled: false, discount_percent: 0 })
+      alert("Product saved successfully!")
       loadAllData()
     } catch (err) {
+      console.error("[Product Save Error]", err)
       alert(err instanceof Error ? err.message : "Error saving product")
     }
   }
@@ -663,7 +734,7 @@ export default function AdminPage() {
         {/* Products Tab */}
         {tab === "products" && (
           <div>
-            <button onClick={() => { setEditingProduct(null); setProductForm({ name: "", price: "", image_url: "", stock: "", category: "" }); setImageFiles([]); setSelectedImageIndex(0); setShowProductForm(!showProductForm) }} className="mb-6 flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:opacity-90"><Plus size={18} /> Add Product</button>
+            <button onClick={() => { setEditingProduct(null); setProductForm({ name: "", price: "", image_url: "", stock: "", category: "", categories: [], details: "" }); setImageFiles([]); setSelectedImageIndex(0); setProductAutoPromo({ enabled: false, discount_percent: 0 }); setShowProductForm(!showProductForm) }} className="mb-6 flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:opacity-90"><Plus size={18} /> Add Product</button>
 
             {showProductForm && (
               <div className="border border-border rounded-lg p-6 mb-8 bg-muted/50">
@@ -735,21 +806,51 @@ export default function AdminPage() {
                     </div>
                   </div>
 
-                  {/* Category Selection */}
+                  {/* Category Selection - Multiple */}
                   <div>
-                    <label className="text-sm mb-2 block font-medium">Category</label>
-                    <select 
-                      value={productForm.category}
-                      onChange={(e) => setProductForm({ ...productForm, category: e.target.value })}
-                      className="w-full px-4 py-2 border border-border rounded-lg"
-                    >
-                      <option value="">Select a category</option>
-                      {categories.map((c) => (
-                        <option key={c.id} value={c.name}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
+                    <label className="text-sm mb-2 block font-medium">Categories ({categories.length}) - Select Multiple</label>
+                    <div className="border border-border rounded-lg p-3 max-h-48 overflow-y-auto bg-blue-50">
+                      {categories.length > 0 ? (
+                        categories.map((c) => (
+                          <label key={c.id} className="flex items-center gap-2 py-2">
+                            <input
+                              type="checkbox"
+                              checked={productForm.categories.includes(c.name)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setProductForm({ ...productForm, categories: [...productForm.categories, c.name] })
+                                } else {
+                                  setProductForm({ ...productForm, categories: productForm.categories.filter(cat => cat !== c.name) })
+                                }
+                              }}
+                              className="w-4 h-4"
+                            />
+                            <span className="text-sm">{c.name}</span>
+                          </label>
+                        ))
+                      ) : (
+                        <>
+                          <label className="flex items-center gap-2 py-2">
+                            <input type="checkbox" onChange={(e) => { if (e.target.checked) setProductForm({ ...productForm, categories: [...productForm.categories, "Furniture"] }) }} className="w-4 h-4" />
+                            <span className="text-sm">Furniture</span>
+                          </label>
+                          <label className="flex items-center gap-2 py-2">
+                            <input type="checkbox" onChange={(e) => { if (e.target.checked) setProductForm({ ...productForm, categories: [...productForm.categories, "Lighting"] }) }} className="w-4 h-4" />
+                            <span className="text-sm">Lighting</span>
+                          </label>
+                          <label className="flex items-center gap-2 py-2">
+                            <input type="checkbox" onChange={(e) => { if (e.target.checked) setProductForm({ ...productForm, categories: [...productForm.categories, "Decor"] }) }} className="w-4 h-4" />
+                            <span className="text-sm">Decor</span>
+                          </label>
+                          <label className="flex items-center gap-2 py-2">
+                            <input type="checkbox" onChange={(e) => { if (e.target.checked) setProductForm({ ...productForm, categories: [...productForm.categories, "Accessories"] }) }} className="w-4 h-4" />
+                            <span className="text-sm">Accessories</span>
+                          </label>
+                        </>
+                      )}
+                    </div>
+                    {productForm.categories.length > 0 && <p className="text-xs text-green-600 mt-2">Selected: {productForm.categories.join(", ")}</p>}
+                    {categories.length === 0 && <p className="text-xs text-yellow-600 mt-1">No categories loaded, using defaults</p>}
                   </div>
 
                   <div>
@@ -761,6 +862,81 @@ export default function AdminPage() {
                       className="w-full px-4 py-2 border border-border rounded-lg" 
                       required
                     />
+                  </div>
+
+                  <div>
+                    <label className="text-sm mb-2 block font-medium">Product Features/Details (one per line)</label>
+                    <textarea
+                      placeholder="Premium quality materials&#10;Modern minimalist design&#10;Eco-friendly production"
+                      value={productForm.details}
+                      onChange={(e) => setProductForm({ ...productForm, details: e.target.value })}
+                      className="w-full px-4 py-2 border border-border rounded-lg h-24"
+                    />
+                  </div>
+
+                  {/* Product Promotion Section */}
+                  <div className="border border-border rounded-lg p-4 bg-blue-50">
+                    <h4 className="font-semibold mb-4">Product Promotion</h4>
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-6">
+                        <label className="flex items-center gap-2">
+                          <input
+                            type="radio"
+                            checked={productPromoMode === "none"}
+                            onChange={() => setProductPromoMode("none")}
+                            className="w-4 h-4"
+                          />
+                          <span className="text-sm">No Promotion</span>
+                        </label>
+                        <label className="flex items-center gap-2">
+                          <input
+                            type="radio"
+                            checked={productPromoMode === "manual"}
+                            onChange={() => setProductPromoMode("manual")}
+                            className="w-4 h-4"
+                          />
+                          <span className="text-sm">Manual Promotion</span>
+                        </label>
+                        <label className="flex items-center gap-2">
+                          <input
+                            type="radio"
+                            checked={productPromoMode === "auto"}
+                            onChange={() => setProductPromoMode("auto")}
+                            className="w-4 h-4"
+                          />
+                          <span className="text-sm">Auto Promotion</span>
+                        </label>
+                      </div>
+                      
+                      {(productPromoMode === "manual" || productPromoMode === "auto") && (
+                        <div className="ml-4 space-y-3 pt-3 border-t border-blue-200">
+                          <div>
+                            <label className="text-sm mb-2 block">Discount Percentage</label>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="number"
+                                min="1"
+                                max="100"
+                                value={productPromoMode === "auto" ? productAutoPromo.discount_percent : productManualPromo.discount_percent}
+                                onChange={(e) => {
+                                  const val = Number(e.target.value)
+                                  if (productPromoMode === "auto") {
+                                    setProductAutoPromo({ ...productAutoPromo, discount_percent: val })
+                                  } else {
+                                    setProductManualPromo({ ...productManualPromo, discount_percent: val })
+                                  }
+                                }}
+                                className="w-24 px-3 py-2 border border-border rounded-lg"
+                              />
+                              <span className="text-sm text-muted-foreground">%</span>
+                            </div>
+                          </div>
+                          <p className="text-xs text-blue-700">
+                            ℹ️ {productPromoMode === "auto" ? "Auto promotion will create a 30-day promotion with this discount." : "Manual promotion - you select which products get this discount."}
+                          </p>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   <div className="flex gap-2">
@@ -779,7 +955,33 @@ export default function AdminPage() {
                     <h3 className="font-semibold mb-2">{product.name}</h3>
                     <p className="text-sm text-muted-foreground mb-3">{product.price}VND</p>
                     <div className="flex gap-2">
-                      <button onClick={() => { setEditingProduct(product); setProductForm({ name: product.name, price: product.price.toString(), image_url: product.image_url, stock: product.stock.toString(), category: product.category || "" }); setImageFiles([]); setSelectedImageIndex(0); setShowProductForm(true) }} className="flex-1 p-2 border border-border rounded hover:bg-muted transition flex items-center justify-center gap-1"><Edit size={16} /> Edit</button>
+                      <button onClick={() => { 
+                        setEditingProduct(product)
+                        setProductForm({ 
+                          name: product.name, 
+                          price: product.price.toString(), 
+                          image_url: product.image_url, 
+                          stock: product.stock.toString(), 
+                          category: product.category || "", 
+                          categories: [], 
+                          details: product.details || "" 
+                        })
+                        // Load existing images
+                        if (product.image_url && product.image_url.length > 0) {
+                          const existingImages = product.image_url.map((url: string) => ({
+                            file: new File([], ''),
+                            preview: url,
+                            isExisting: true
+                          }))
+                          setImageFiles(existingImages as any)
+                          setSelectedImageIndex(0)
+                        } else {
+                          setImageFiles([])
+                          setSelectedImageIndex(0)
+                        }
+                        setProductAutoPromo({ enabled: false, discount_percent: 0 })
+                        setShowProductForm(true) 
+                      }} className="flex-1 p-2 border border-border rounded hover:bg-muted transition flex items-center justify-center gap-1"><Edit size={16} /> Edit</button>
                       <button onClick={() => handleDeleteProduct(product.id)} className="flex-1 p-2 border border-red-300 text-red-600 rounded hover:bg-red-50 transition flex items-center justify-center gap-1"><Trash2 size={16} /> Delete</button>
                     </div>
                   </div>
@@ -812,16 +1014,189 @@ export default function AdminPage() {
             </table>
 
             {isModalOpen && selectedUser && (
-              <Modal onClose={() => { setIsModalOpen(false); setSelectedUser(null); setUserOrders([]) }}>
-                <button onClick={() => { setIsModalOpen(false); setSelectedUser(null); setUserOrders([]) }} className="p-2 hover:bg-red-100 text-red-600 rounded-lg transition self-start">X</button>
-                <h3 className="text-xl font-bold mb-4">{selectedUser.email}</h3>
-                <p className="mb-6">Joined on {new Date(selectedUser.created_at).toLocaleDateString()}</p>
+              <Modal onClose={() => { setIsModalOpen(false); setSelectedUser(null); setUserOrders([]); setIsEditingUserProfile(false) }}>
+                <div className="space-y-6 max-h-screen overflow-y-auto">
+                  <button onClick={() => { setIsModalOpen(false); setSelectedUser(null); setUserOrders([]); setIsEditingUserProfile(false) }} className="p-2 hover:bg-red-100 text-red-600 rounded-lg transition self-start">X</button>
+                  
+                  {/* User Profile Section */}
+                  <div>
+                    <h3 className="text-xl font-bold mb-2">{selectedUser.email}</h3>
+                    <p className="text-sm text-muted-foreground mb-4">Joined {new Date(selectedUser.created_at).toLocaleDateString()}</p>
+                    
+                    {/* Profile Display View */}
+                    {!isEditingUserProfile && (
+                      <div className="border border-border rounded-lg p-4 mb-4 bg-muted/30 space-y-3">
+                        <div>
+                          <label className="text-xs font-medium text-muted-foreground uppercase">Full Name</label>
+                          <p className="text-sm">{userProfileEdit.full_name || "—"}</p>
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-muted-foreground uppercase">Phone</label>
+                          <p className="text-sm">{userProfileEdit.phone || "—"}</p>
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-muted-foreground uppercase">Address</label>
+                          <p className="text-sm">{userProfileEdit.address || "—"}</p>
+                        </div>
+                        <div className="grid grid-cols-3 gap-4">
+                          <div>
+                            <label className="text-xs font-medium text-muted-foreground uppercase">City</label>
+                            <p className="text-sm">{userProfileEdit.city || "—"}</p>
+                          </div>
+                          <div>
+                            <label className="text-xs font-medium text-muted-foreground uppercase">Postal Code</label>
+                            <p className="text-sm">{userProfileEdit.postal_code || "—"}</p>
+                          </div>
+                          <div>
+                            <label className="text-xs font-medium text-muted-foreground uppercase">Country</label>
+                            <p className="text-sm">{userProfileEdit.country || "—"}</p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Profile Edit Form */}
+                    {isEditingUserProfile && (
+                      <div className="border border-border rounded-lg p-4 mb-4 space-y-4 bg-muted/50">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="text-sm font-medium mb-2 block">Full Name</label>
+                            <input
+                              type="text"
+                              value={userProfileEdit.full_name}
+                              onChange={(e) => setUserProfileEdit({ ...userProfileEdit, full_name: e.target.value })}
+                              className="w-full px-3 py-2 border border-border rounded-lg"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium mb-2 block">Phone</label>
+                            <input
+                              type="tel"
+                              value={userProfileEdit.phone}
+                              onChange={(e) => setUserProfileEdit({ ...userProfileEdit, phone: e.target.value })}
+                              className="w-full px-3 py-2 border border-border rounded-lg"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium mb-2 block">Address</label>
+                          <input
+                            type="text"
+                            value={userProfileEdit.address}
+                            onChange={(e) => setUserProfileEdit({ ...userProfileEdit, address: e.target.value })}
+                            className="w-full px-3 py-2 border border-border rounded-lg"
+                          />
+                        </div>
+                        <div className="grid grid-cols-3 gap-4">
+                          <div>
+                            <label className="text-sm font-medium mb-2 block">City</label>
+                            <input
+                              type="text"
+                              value={userProfileEdit.city}
+                              onChange={(e) => setUserProfileEdit({ ...userProfileEdit, city: e.target.value })}
+                              className="w-full px-3 py-2 border border-border rounded-lg"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium mb-2 block">Postal Code</label>
+                            <input
+                              type="text"
+                              value={userProfileEdit.postal_code}
+                              onChange={(e) => setUserProfileEdit({ ...userProfileEdit, postal_code: e.target.value })}
+                              className="w-full px-3 py-2 border border-border rounded-lg"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium mb-2 block">Country</label>
+                            <input
+                              type="text"
+                              value={userProfileEdit.country}
+                              onChange={(e) => setUserProfileEdit({ ...userProfileEdit, country: e.target.value })}
+                              className="w-full px-3 py-2 border border-border rounded-lg"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={async () => {
+                              const supabase = createClient()
+                              try {
+                                const { error } = await supabase.from("profiles").update(userProfileEdit).eq("id", selectedUser.id)
+                                if (error) throw error
+                                setIsEditingUserProfile(false)
+                                loadAllData()
+                                alert("Profile updated successfully")
+                              } catch (err) {
+                                alert(err instanceof Error ? err.message : "Error updating profile")
+                              }
+                            }}
+                            className="flex-1 px-3 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700"
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={() => setIsEditingUserProfile(false)}
+                            className="flex-1 px-3 py-2 text-sm border border-border rounded hover:bg-muted"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Action Buttons */}
+                    {!isEditingUserProfile && (
+                      <div className="flex gap-2 mb-6">
+                        <button 
+                          onClick={() => setIsEditingUserProfile(true)}
+                          className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                        >
+                          Edit Profile
+                        </button>
+                        <button 
+                          onClick={async () => {
+                            if (!confirm("Are you sure you want to delete this user?")) return
+                            const supabase = createClient()
+                            try {
+                              const { error } = await supabase.from("profiles").delete().eq("id", selectedUser.id)
+                              if (error) throw error
+                              setIsModalOpen(false)
+                              setSelectedUser(null)
+                              setIsEditingUserProfile(false)
+                              loadAllData()
+                              alert("User deleted successfully")
+                            } catch (err) {
+                              alert(err instanceof Error ? err.message : "Error deleting user")
+                            }
+                          }}
+                          className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700"
+                        >
+                          Delete User
+                        </button>
+                      </div>
+                    )}
+                  </div>
 
-                <h4 className="text-lg font-semibold mb-4">Orders</h4>
-                <div className="max-h-60 overflow-y-scroll">
-                  {userOrders.length === 0 ? (<p>No orders found for this user.</p>) : (
-                    <ul>{userOrders.map((order) => (<li key={order.id} className="mb-4"><Link href={`/admin/order/${order.id}`} className="text-primary"><p>Order #{order.order_number} - {order.total_amount.toFixed(2)}VND</p></Link></li>))}</ul>
-                  )}
+                  {/* User Orders Section */}
+                  <div>
+                    <h4 className="text-lg font-semibold mb-3">Orders ({userOrders.length})</h4>
+                    <div className="max-h-48 overflow-y-auto border border-border rounded-lg p-3">
+                      {userOrders.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No orders found for this user.</p>
+                      ) : (
+                        <ul className="space-y-2">
+                          {userOrders.map((order) => (
+                            <li key={order.id} className="text-sm border-b pb-2">
+                              <Link href={`/admin/order/${order.id}`} className="text-primary hover:underline">
+                                Order #{order.order_number}
+                              </Link>
+                              <p className="text-muted-foreground">{order.total_amount.toFixed(2)}VND</p>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </Modal>
             )}

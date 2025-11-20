@@ -82,8 +82,18 @@ export default function CartPage() {
                         </button>
                       </div>
                       <div className="text-right">
-                        <p className="font-bold text-lg text-primary">${(item.price * item.quantity).toFixed(2)}</p>
-                        <p className="text-sm text-muted-foreground">${item.price} each</p>
+                        {item.discount_percent && item.discount_percent > 0 ? (
+                          <>
+                            <p className="font-bold text-lg text-primary">{(item.discount_price! * item.quantity).toFixed(0)}VND</p>
+                            <p className="text-sm text-muted-foreground line-through">{(item.price * item.quantity).toFixed(0)}VND</p>
+                            <p className="text-xs text-red-600 font-semibold">-{item.discount_percent}%</p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="font-bold text-lg text-primary">{(item.price * item.quantity).toFixed(0)}VND</p>
+                            <p className="text-sm text-muted-foreground">{item.price.toFixed(0)}VND each</p>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>

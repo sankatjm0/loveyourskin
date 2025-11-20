@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import { useCart } from "@/hooks/use-cart"
 import { ArrowLeft, AlertCircle } from "lucide-react"
@@ -23,6 +23,43 @@ export default function CheckoutPage() {
     zip: "",
   })
   const [isProcessing, setIsProcessing] = useState(false)
+
+  // Load user profile data
+  useEffect(() => {
+    const loadUserProfile = async () => {
+      try {
+        const supabase = createClient()
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
+
+        if (!user) return
+
+        // Fetch user profile
+        const response = await fetch("/api/profile")
+        if (response.ok) {
+          const profile = await response.json()
+          const [firstName, ...lastNameParts] = (profile.full_name || "").split(" ")
+
+          setFormData((prev) => ({
+            ...prev,
+            firstName: firstName || "",
+            lastName: lastNameParts.join(" ") || "",
+            email: user.email || "",
+            phone: profile.phone || "",
+            address: profile.address || "",
+            city: profile.city || "",
+            zip: profile.postal_code || "",
+            state: profile.country || "",
+          }))
+        }
+      } catch (error) {
+        console.error("Error loading profile:", error)
+      }
+    }
+
+    loadUserProfile()
+  }, [])
 
   if (cart.length === 0) {
     return (
@@ -97,12 +134,12 @@ export default function CheckoutPage() {
 
       if (orderError) throw orderError
 
-      // Add order items
+      // Add order items with discounted prices
       const orderItems = cart.map((item) => ({
         order_id: order.id,
-        product_id: item.product_id, // UUID
+        product_id: item.product_id,
         quantity: item.quantity,
-        price: item.price,
+        price: item.discount_price || item.price,
       }))
 
       const { error: itemsError } = await supabase
