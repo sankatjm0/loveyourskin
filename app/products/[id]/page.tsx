@@ -4,11 +4,26 @@ import { AddToCartButton } from "@/components/add-to-cart-button"
 import Link from "next/link"
 import { ChevronLeft } from "lucide-react"
 import { getActivePromotionForProduct } from "@/lib/promotions" // optional, if you want server-side fetch
+import ProductGallery from "./product-gallery" // client component for image slider
 
 export async function generateStaticParams() {
   try {
     const products = await getProducts()
-    return products.map((product) => ({ id: product.id }))
+    // Filter out products with invalid IDs and log suspicious ones
+    return products
+      .filter((product) => {
+        // Valid IDs should be strings that don't look like JSON or arrays
+        const isValid = product.id && 
+                       typeof product.id === 'string' && 
+                       !product.id.includes('[') && 
+                       !product.id.includes('http') && 
+                       product.id.trim().length > 0
+        if (!isValid) {
+          console.warn(`[generateStaticParams] Skipping product with invalid ID:`, product.id)
+        }
+        return isValid
+      })
+      .map((product) => ({ id: product.id }))
   } catch {
     return []
   }
@@ -16,6 +31,20 @@ export async function generateStaticParams() {
 
 export default async function ProductPage({ params }: { params: { id: string } }) {
   const { id } = await params
+  
+  // Validate that id looks like a valid UUID/ID (not an encoded array or URL)
+  if (!id || typeof id !== 'string' || id.includes('%') || id.includes('[') || id.includes('http')) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-3xl font-bold mb-4">Product Not Found</h1>
+          <p className="text-muted-foreground mb-8">Invalid product ID</p>
+          <Link href="/products" className="text-primary hover:underline">Back to Products</Link>
+        </div>
+      </div>
+    )
+  }
+  
   try {
     const product = await getProductById(id)
     // Optional: fetch active promotion for product server-side
@@ -40,38 +69,8 @@ export default async function ProductPage({ params }: { params: { id: string } }
           <Link href="/products" className="text-sm hover:text-primary transition flex items-center gap-2 mb-8"><ChevronLeft size={16} /> Back to Products</Link>
 
           <div className="grid md:grid-cols-2 gap-12">
-            {/* Product Images Gallery */}
-            <div className="flex flex-col gap-4">
-              {/* Main Image */}
-              <div className="bg-muted rounded-lg overflow-hidden aspect-square">
-                <img 
-                  src={product.image_urls && product.image_urls.length > 0 
-                    ? product.image_urls[0] 
-                    : product.image_url || "/placeholder.svg?height=600&width=600&query=product"} 
-                  alt={product.name} 
-                  className="w-full h-full object-cover" 
-                  id="mainImage"
-                />
-              </div>
-              
-              {/* Thumbnail Gallery */}
-              {product.image_urls && product.image_urls.length > 1 && (
-                <div className="flex gap-3 overflow-x-auto pb-2">
-                  {product.image_urls.map((imgUrl, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => {
-                        const img = document.getElementById('mainImage') as HTMLImageElement
-                        if (img) img.src = imgUrl
-                      }}
-                      className="w-20 h-20 flex-shrink-0 border-2 border-border rounded-lg overflow-hidden hover:border-primary transition"
-                    >
-                      <img src={imgUrl} alt={`product-${idx}`} className="w-full h-full object-cover" />
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            {/* Product Images Gallery - Client Component */}
+            <ProductGallery product={product} />
 
             {/* Product Details */}
             <div className="flex flex-col justify-between">

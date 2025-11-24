@@ -43,7 +43,7 @@ export default function Home() {
 
       // Get promotions for each product
       const productsWithPromos = await Promise.all(
-        products.map(async (product) => {
+        products.map(async (product: any) => {
           const promo = await getActivePromotionForProduct(product.id)
           const discountedPrice = promo 
             ? product.price * (1 - promo.discount_percent / 100)
@@ -99,12 +99,9 @@ export default function Home() {
             {!isLoading && user && <Notifications isAdmin={user.user_metadata?.is_admin} />}
             {!isLoading && user ? (
               <>
-                <Link href="/profile" className="p-2 hover:bg-muted rounded-lg transition" title="View Profile">
-                  <Mail size={20} />
-                </Link>
                 <div className="flex items-center gap-3">
                   <div className="text-right">
-                    <p className="text-sm font-medium">{user.email}</p>
+                    <Link href="/profile"><p className="text-sm font-medium">{user.email}</p></Link>
                     <Link href="/orders" className="text-xs text-muted-foreground hover:text-primary">
                       My Orders
                     </Link>
@@ -174,7 +171,7 @@ export default function Home() {
         
         {featuredProducts.length === 0 ? (
           <div className="text-center py-12 bg-muted rounded-lg">
-            <p className="text-lg text-muted-foreground">Theo dõi trang để cập nhật khuyến mãi sớm nhất bạn nhé</p>
+            <p className="text-lg text-muted-foreground">Follow us to be the earliest to earn our promotions!</p>
           </div>
         ) : (
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">

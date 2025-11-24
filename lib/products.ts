@@ -57,7 +57,15 @@ export async function getProducts(): Promise<Product[]> {
     const supabase = await createClient()
     const { data, error } = await supabase.from("products").select("*").order("created_at", { ascending: false })
     if (error) throw error
-    return data || FALLBACK_PRODUCTS
+    if (data) {
+      // Ensure all products have valid id fields and are properly typed
+      const validProducts = data.filter((p: any) => p.id && typeof p.id === 'string' && p.id.trim().length > 0)
+      if (validProducts.length !== data.length) {
+        console.warn(`[Products] Filtered out ${data.length - validProducts.length} invalid products`)
+      }
+      return validProducts as Product[]
+    }
+    return FALLBACK_PRODUCTS
   } catch {
     // Return fallback during build or if Supabase is unavailable
     return FALLBACK_PRODUCTS
@@ -69,6 +77,13 @@ export async function getProductById(id: string): Promise<Product> {
     const supabase = await createClient()
     const { data, error } = await supabase.from("products").select("*").eq("id", id).single()
     if (error) throw error
+    
+    // Ensure image_urls is a valid string if present, coerce if needed
+    if (data && data.image_urls && typeof data.image_urls !== 'string') {
+      data.image_urls = String(data.image_urls)
+    }
+    
+    console.log('[Products] Retrieved product:', id, 'image_urls type:', typeof data?.image_urls, 'value:', String(data?.image_urls || '').substring(0, 200))
     return data
   } catch {
     // Return fallback product if not found

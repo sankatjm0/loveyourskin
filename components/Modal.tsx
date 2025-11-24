@@ -10,7 +10,7 @@ export const Modal = ({ children, onClose, title, isOpen = true }: ModalProps) =
 
   return (
     <div className="fixed inset-0 bg-black/50 flex justify-center items-center z-50">
-      <div className="bg-white p-6 rounded-lg shadow-lg w-96 max-h-96 overflow-y-auto">
+      <div className="bg-white p-6 rounded-lg shadow-lg w-200 max-h-200 overflow-y-auto">
         {title && (
           <div className="flex items-center justify-between mb-4 pb-4 border-b">
             <h2 className="text-xl font-bold">{title}</h2>

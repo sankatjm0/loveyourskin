@@ -16,6 +16,11 @@ export function ProductsFilters({ products, categories: initialCategories }: Pro
   const [selectedCategory, setSelectedCategory] = useState("All")
   const [categories, setCategories] = useState<any[]>(initialCategories || [])
   const [productDiscounts, setProductDiscounts] = useState<Record<string, { discount_percent: number; promotion_name: string }>>({})
+  const [priceRange, setPriceRange] = useState({ min: 0, max: 1000000000 })
+  const [alertModal, setAlertModal] = useState({ isOpen: false, title: "Alert", message: "", type: "info" as "info" | "success" | "error" | "warning" })
+  const showAlert = (message: string, type: "info" | "success" | "error" | "warning" = "info", title: string = "Alert") => {
+    setAlertModal({ isOpen: true, title, message, type })
+  }
 
   // Fetch categories from database and load promotions
   useEffect(() => {
@@ -63,6 +68,11 @@ export function ProductsFilters({ products, categories: initialCategories }: Pro
         product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (product.description || "").toLowerCase().includes(searchTerm.toLowerCase())
       
+      // Price filter
+      if (product.price < priceRange.min || product.price > priceRange.max) {
+        return false
+      }
+      
       if (selectedCategory === "Sale") {
         // Show only products with active discounts
         return matchesSearch && productDiscounts[product.id]
@@ -71,7 +81,7 @@ export function ProductsFilters({ products, categories: initialCategories }: Pro
       const matchesCategory = selectedCategory === "All" || product.category === selectedCategory
       return matchesSearch && matchesCategory
     })
-  }, [searchTerm, selectedCategory, products, productDiscounts])
+  }, [searchTerm, selectedCategory, products, productDiscounts, priceRange])
 
   return (
     <>
@@ -102,6 +112,31 @@ export function ProductsFilters({ products, categories: initialCategories }: Pro
             {category}
           </button>
         ))}
+
+          <div className="flex gap-2 overflow-x-auto items-center">
+            <label className="text-sm font-medium">Price Range</label>
+            <input 
+              type="number" 
+              placeholder="Min" 
+              value={priceRange.min}
+              onChange={(e) => setPriceRange({...priceRange, min: Number(e.target.value)})}
+              className="w-24 px-3 py-2 border border-border rounded text-sm"
+            />
+            <span className="text-sm">-</span>
+            <input 
+              type="number" 
+              placeholder="Max" 
+              value={priceRange.max}
+              onChange={(e) => setPriceRange({...priceRange, max: Number(e.target.value)})}
+              className="w-24 px-3 py-2 border border-border rounded text-sm"
+            />
+          </div>
+        <button
+          onClick={() => setPriceRange({ min: 0, max: 1000000000 })}
+          className="px-3 py-2 text-sm border border-border rounded hover:bg-muted transition"
+        >
+          Reset Price
+        </button>
       </div>
 
       {/* Products Grid */}
@@ -153,6 +188,57 @@ export function ProductsFilters({ products, categories: initialCategories }: Pro
       {filteredProducts.length === 0 && (
         <div className="text-center py-12">
           <p className="text-muted-foreground text-lg">No products found matching your criteria.</p>
+        </div>
+      )}
+
+      {/* Alert Modal */}
+      {alertModal.isOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className={`bg-white rounded-lg shadow-lg p-6 max-w-sm w-full mx-4 border-l-4 ${
+            alertModal.type === 'success' ? 'border-green-500 bg-green-50' :
+            alertModal.type === 'error' ? 'border-red-500 bg-red-50' :
+            alertModal.type === 'warning' ? 'border-yellow-500 bg-yellow-50' :
+            'border-blue-500 bg-blue-50'
+          }`}>
+            <div className="flex items-start gap-4">
+              <div className={`text-2xl ${
+                alertModal.type === 'success' ? 'text-green-600' :
+                alertModal.type === 'error' ? 'text-red-600' :
+                alertModal.type === 'warning' ? 'text-yellow-600' :
+                'text-blue-600'
+              }`}>
+                {alertModal.type === 'success' && '✓'}
+                {alertModal.type === 'error' && '✕'}
+                {alertModal.type === 'warning' && '⚠'}
+                {alertModal.type === 'info' && 'ℹ'}
+              </div>
+              <div className="flex-1">
+                <h3 className={`font-bold text-lg ${
+                  alertModal.type === 'success' ? 'text-green-800' :
+                  alertModal.type === 'error' ? 'text-red-800' :
+                  alertModal.type === 'warning' ? 'text-yellow-800' :
+                  'text-blue-800'
+                }`}>{alertModal.title}</h3>
+                <p className={`text-sm mt-2 ${
+                  alertModal.type === 'success' ? 'text-green-700' :
+                  alertModal.type === 'error' ? 'text-red-700' :
+                  alertModal.type === 'warning' ? 'text-yellow-700' :
+                  'text-blue-700'
+                }`}>{alertModal.message}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setAlertModal({ ...alertModal, isOpen: false })}
+              className={`mt-6 w-full py-2 rounded font-medium text-white transition ${
+                alertModal.type === 'success' ? 'bg-green-600 hover:bg-green-700' :
+                alertModal.type === 'error' ? 'bg-red-600 hover:bg-red-700' :
+                alertModal.type === 'warning' ? 'bg-yellow-600 hover:bg-yellow-700' :
+                'bg-blue-600 hover:bg-blue-700'
+              }`}
+            >
+              OK
+            </button>
+          </div>
         </div>
       )}
     </>

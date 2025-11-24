@@ -30,7 +30,7 @@ interface Product {
   name: string
   price: number
   image_url: string
-  image_url?: string[]
+  image_urls?: string[] | null
   stock: number
   category?: string
   details?: string
@@ -64,12 +64,37 @@ export default function AdminPage() {
   const [showProductForm, setShowProductForm] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [productForm, setProductForm] = useState({ name: "", price: "", image_url: "", stock: "", category: "", categories: [] as string[], details: "" })
-  const [imageFiles, setImageFiles] = useState<{ file: File; preview: string }[]>([]) // For preview
+  const [imageFiles, setImageFiles] = useState<{ file: File; preview: string; isExisting?: boolean }[]>([]) // For preview
   const [selectedImageIndex, setSelectedImageIndex] = useState(0)
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([])
   const [productPromoMode, setProductPromoMode] = useState<"none" | "manual" | "auto">("none")
   const [productAutoPromo, setProductAutoPromo] = useState<{ enabled: boolean; discount_percent: number }>({ enabled: false, discount_percent: 0 })
   const [productManualPromo, setProductManualPromo] = useState<{ enabled: boolean; discount_percent: number }>({ enabled: false, discount_percent: 0 })
+  
+  // Search & Filter states
+  const [productSearch, setProductSearch] = useState("")
+  const [productPriceRange, setProductPriceRange] = useState({ min: 0, max: 1000000000 })
+  const [productCategoryFilter, setProductCategoryFilter] = useState<string[]>([])
+  const [userSearch, setUserSearch] = useState("")
+  const [orderSearch, setOrderSearch] = useState("")
+  const [orderStatusFilter, setOrderStatusFilter] = useState<string[]>([])
+  const [promoSearch, setPromoSearch] = useState("")
+
+  // Alert modal state
+  const [alertModal, setAlertModal] = useState({ isOpen: false, title: "Alert", message: "", type: "info" as "info" | "success" | "error" | "warning" })
+  const showAlert = (message: string, type: "info" | "success" | "error" | "warning" = "info", title: string = "Alert") => {
+    setAlertModal({ isOpen: true, title, message, type })
+  }
+
+  // Confirmation modal state
+  const [confirmModal, setConfirmModal] = useState({ 
+    isOpen: false, 
+    title: "Confirm", 
+    message: "", 
+    onConfirm: async () => {},
+    confirmText: "Confirm",
+    cancelText: "Cancel"
+  })
 
   // Users state
   const [users, setUsers] = useState<User[]>([])
@@ -113,6 +138,70 @@ export default function AdminPage() {
   // Realtime channel
   const [realtimeChannel, setRealtimeChannel] = useState<any>(null)
 
+  async function updateOrderStatus(id: string, newStatus: string) {
+    const supabase = createClient()
+    try {
+      // Get the order to find user_id
+      const { data: orderDataArray, error: fetchError } = await supabase
+        .from("orders")
+        .select("user_id")
+        .eq("id", id)
+
+      if (fetchError) throw fetchError
+      if (!orderDataArray || orderDataArray.length === 0) throw new Error("Order not found")
+
+      const orderData = orderDataArray[0]
+
+      const { error } = await supabase
+        .from("orders")
+        .update({ status: newStatus, updated_at: new Date().toISOString() })
+        .eq("id", id)
+
+      if (error) throw error
+
+      // Create notification for user
+      try {
+        const statusMessages: { [key: string]: string } = {
+          confirmed: "Your order has been confirmed and is being prepared",
+          rejected: "Your order has been rejected",
+          shipping: "Your order is on the way to you",
+          delivered: "Your order has been delivered",
+        }
+
+        const message = statusMessages[newStatus] || `Your order status has been updated to ${newStatus}`
+
+        await supabase.from("notifications").insert({
+          user_id: orderData.user_id,
+          type: "order_status",
+          title: "Order Status Updated",
+          message: message,
+          link: `/orders/${id}`,
+          read: false,
+        })
+      } catch (notifError) {
+        console.error("Failed to create notification:", notifError)
+      }
+
+      // Update local state for UI to reflect changes immediately
+      setOrders(prevOrders =>
+        prevOrders.map(order =>
+          order.id === id ? { ...order, status: newStatus } : order
+        )
+      )
+      
+      // Also update user orders list if showing user details
+      setUserOrders(prevOrders =>
+        prevOrders.map(order =>
+          order.id === id ? { ...order, status: newStatus } : order
+        )
+      )
+
+      showAlert("Order status updated successfully", "success", "Order Updated")
+    } catch (err) {
+      showAlert(err instanceof Error ? err.message : "Error updating order", "error", "Error")
+    }
+  }
+
   useEffect(() => {
     if (!selectedUser) return
     const fetchData = async () => {
@@ -153,7 +242,14 @@ export default function AdminPage() {
         return
       }
 
-      const { data: adminData } = await supabase.from("admin_access").select("is_admin").eq("user_id", user.id).single()
+      const { data: adminData, error: adminError } = await supabase.from("admin_access").select("is_admin").eq("user_id", user.id).maybeSingle()
+
+      if (adminError) {
+        console.error("Admin access check error:", adminError)
+        setError("Failed to check admin access")
+        setIsLoading(false)
+        return
+      }
 
       if (adminData?.is_admin) {
         setIsAuthenticated(true)
@@ -208,13 +304,14 @@ export default function AdminPage() {
     setIsLoading(true)
     const supabase = createClient()
 
-    const [productsRes, usersRes, ordersRes, promotionsRes, slidesRes, historyRes] = await Promise.all([
+    const [productsRes, usersRes, ordersRes, promotionsRes, slidesRes, historyRes, promoProductsRes] = await Promise.all([
       supabase.from("products").select("*"),
       supabase.from("profiles").select("id, email, created_at"),
       supabase.from("orders").select("*, profiles(email)").order("created_at", { ascending: false }),
       supabase.from("promotions").select("*").order("created_at", { ascending: false }),
       supabase.from("promotion_slides").select("*").order("display_order"),
       supabase.from("history").select("*").order("created_at", { ascending: false }).limit(50),
+      supabase.from("promotion_products").select("*"),
     ])
 
     setProducts(productsRes.data || [])
@@ -225,12 +322,12 @@ export default function AdminPage() {
     setHistoryRecords(historyRes.data || [])
 
     // Calculate stats
-    const completedOrders = (ordersRes.data || []).filter((o) => o.status === "delivered")
-    const totalRevenue = completedOrders.reduce((sum, o) => sum + (o.total_amount || 0), 0)
+    const completedOrders = (ordersRes.data || []).filter((o: any) => o.status === "delivered")
+    const totalRevenue = completedOrders.reduce((sum: number, o: any) => sum + (o.total_amount || 0), 0)
 
     setStats({
       totalOrders: ordersRes.data?.length || 0,
-      pendingOrders: (ordersRes.data || []).filter((o) => o.status === "pending").length,
+      pendingOrders: (ordersRes.data || []).filter((o: any) => o.status === "pending").length,
       totalRevenue,
     })
 
@@ -243,10 +340,10 @@ export default function AdminPage() {
       }
 
       const channel = supabase.channel("public:admin-dashboard")
-        .on("postgres_changes", { event: "INSERT", schema: "public", table: "orders" }, payload => loadAllData())
-        .on("postgres_changes", { event: "UPDATE", schema: "public", table: "orders" }, payload => loadAllData())
-        .on("postgres_changes", { event: "INSERT", schema: "public", table: "order_items" }, payload => loadAllData())
-        .on("postgres_changes", { event: "UPDATE", schema: "public", table: "order_items" }, payload => loadAllData())
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "orders" }, (payload: any) => loadAllData())
+        .on("postgres_changes", { event: "UPDATE", schema: "public", table: "orders" }, (payload: any) => loadAllData())
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "order_items" }, (payload: any) => loadAllData())
+        .on("postgres_changes", { event: "UPDATE", schema: "public", table: "order_items" }, (payload: any) => loadAllData())
         .subscribe()
       setRealtimeChannel(channel)
     } catch (err) {
@@ -278,28 +375,48 @@ export default function AdminPage() {
 
   async function handleSaveProduct() {
     if (!productForm.name || !productForm.price) {
-      alert("Please fill product name and price")
+      showAlert("Please fill product name and price", "warning", "Missing Fields")
       return
     }
     if (productForm.categories.length === 0) {
-      alert("Please select at least one category")
+      showAlert("Please select at least one category", "warning", "Missing Fields")
       return
     }
 
     const supabase = createClient()
     try {
-      // Upload new images from imageFiles
+      // Upload ONLY new images (not existing ones)
       const newImageUrls: string[] = []
       for (const imgData of imageFiles) {
+        // Skip existing images - they already have a preview URL from the database
+        if (imgData.isExisting) {
+          newImageUrls.push(imgData.preview)
+          continue
+        }
+
+        // Skip empty files (fallback check)
+        if (!imgData.file || imgData.file.size === 0) {
+          console.warn("[Admin] Skipping empty file")
+          continue
+        }
+
         const ext = imgData.file.name.split(".").pop()
-        const fileName = `products/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
+        const uniqueId = Math.random().toString(36).slice(2) + Date.now()
+        const fileName = `products/${uniqueId}.${ext}`
+        console.log("[Admin] Uploading file:", imgData.file.name, "->", fileName, "size:", imgData.file.size)
         const { error: uploadError } = await supabase.storage
           .from("product_images")
           .upload(fileName, imgData.file, { cacheControl: "3600", upsert: false })
-        if (uploadError) throw uploadError
+        if (uploadError) {
+          console.error("[Admin] Upload error for", fileName, uploadError)
+          throw uploadError
+        }
         const { data: publicUrl } = supabase.storage.from("product_images").getPublicUrl(fileName)
-        newImageUrls.push(publicUrl.publicUrl)
+        const cleanUrl = String(publicUrl.publicUrl || "").trim()
+        console.log("[Admin] Uploaded image URL:", cleanUrl)
+        newImageUrls.push(cleanUrl)
       }
+      console.log("[Admin] All image URLs (new + existing):", newImageUrls)
       
       // First image is cover
       const coverImage = newImageUrls[0] || productForm.image_url
@@ -307,32 +424,78 @@ export default function AdminPage() {
 
       let savedProduct: any = null
       if (editingProduct) {
-        const allImageUrls = [...newImageUrls]
+        let allImageUrls = [...newImageUrls]
         // If no new images, keep existing ones
-        if (allImageUrls.length === 0 && editingProduct.image_url?.length) {
-          allImageUrls.push(...editingProduct.image_url)
+        if (allImageUrls.length === 0) {
+          let existingImageUrls: string[] = []
+          if (editingProduct.image_urls) {
+            if (typeof editingProduct.image_urls === 'string') {
+              try {
+                existingImageUrls = JSON.parse(editingProduct.image_urls)
+              } catch {
+                existingImageUrls = [editingProduct.image_urls]
+              }
+            } else if (Array.isArray(editingProduct.image_urls)) {
+              existingImageUrls = editingProduct.image_urls
+            }
+          }
+          allImageUrls = existingImageUrls
+        }
+        
+        const imageUrlsToSave = allImageUrls.length > 0 ? JSON.stringify(allImageUrls) : null
+        console.log("[Admin] Image URLs array before stringify:", allImageUrls)
+        console.log("[Admin] Image URLs after JSON.stringify:", imageUrlsToSave)
+        
+        // Validate that imageUrlsToSave is proper JSON
+        if (imageUrlsToSave) {
+          try {
+            const validateParse = JSON.parse(imageUrlsToSave)
+            if (!Array.isArray(validateParse)) {
+              throw new Error("image_urls must be an array")
+            }
+          } catch (e) {
+            console.error("[Admin] Invalid image_urls format:", imageUrlsToSave, e)
+            throw new Error("Invalid image URLs format")
+          }
         }
         
         const updateData: any = {
           name: productForm.name,
           price: Number.parseFloat(productForm.price),
-          image_url: coverImage || editingProduct.image_url,
-          image_url: allImageUrls.length > 0 ? allImageUrls : null,
+          image_url: allImageUrls[0] || editingProduct.image_url,
+          image_urls: imageUrlsToSave,
           stock: Number.parseInt(productForm.stock),
           category: categoryStr,
           details: productForm.details,
           updated_at: new Date().toISOString(),
         }
-        console.log("[Product Update] Payload:", updateData)
-        const { error } = await supabase.from("products").update(updateData).eq("id", editingProduct.id)
+        console.log("[Product Update] Final payload:", updateData)
+        const { data: updatedDataArray, error } = await supabase.from("products").update(updateData).eq("id", editingProduct.id).select()
         if (error) throw error
-        savedProduct = editingProduct // Use existing product as reference
+        savedProduct = updatedDataArray && updatedDataArray.length > 0 ? updatedDataArray[0] : editingProduct
       } else {
+        const imageUrlsToSave = newImageUrls.length > 0 ? JSON.stringify(newImageUrls) : null
+        console.log("[Admin] New product - Image URLs array:", newImageUrls)
+        console.log("[Admin] New product - After stringify:", imageUrlsToSave)
+        
+        // Validate that imageUrlsToSave is proper JSON
+        if (imageUrlsToSave) {
+          try {
+            const validateParse = JSON.parse(imageUrlsToSave)
+            if (!Array.isArray(validateParse)) {
+              throw new Error("image_urls must be an array")
+            }
+          } catch (e) {
+            console.error("[Admin] Invalid image_urls format:", imageUrlsToSave, e)
+            throw new Error("Invalid image URLs format")
+          }
+        }
+        
         const { data, error } = await supabase.from("products").insert({
           name: productForm.name,
           price: Number.parseFloat(productForm.price),
-          image_url: coverImage,
-          image_url: newImageUrls.length > 0 ? newImageUrls : null,
+          image_url: newImageUrls[0] || "",
+          image_urls: imageUrlsToSave,
           stock: Number.parseInt(productForm.stock),
           category: categoryStr,
           details: productForm.details,
@@ -345,7 +508,7 @@ export default function AdminPage() {
       // Handle promotions (auto or manual)
       if (productPromoMode === "auto" && productAutoPromo.discount_percent > 0) {
         // Create auto promotion
-        const { data: promo, error: promoError } = await supabase
+        const { data: promoArray, error: promoError } = await supabase
           .from("promotions")
           .insert({
             name: `Auto - ${productForm.name}`,
@@ -355,9 +518,10 @@ export default function AdminPage() {
             is_active: true,
           })
           .select()
-          .single()
 
         if (promoError) throw promoError
+        const promo = promoArray && promoArray.length > 0 ? promoArray[0] : null
+        if (!promo) throw new Error("Failed to create promotion")
 
         // Link product to promotion
         const { error: linkError } = await supabase.from("promotion_products").insert({
@@ -380,24 +544,35 @@ export default function AdminPage() {
       setProductPromoMode("none")
       setProductAutoPromo({ enabled: false, discount_percent: 0 })
       setProductManualPromo({ enabled: false, discount_percent: 0 })
-      alert("Product saved successfully!")
+      showAlert("Product saved successfully!", "success", "Success")
       loadAllData()
     } catch (err) {
       console.error("[Product Save Error]", err)
-      alert(err instanceof Error ? err.message : "Error saving product")
+      showAlert(err instanceof Error ? err.message : "Error saving product", "error", "Error")
     }
   }
 
   async function handleDeleteProduct(id: string) {
-    if (!confirm("Are you sure?")) return
-    const supabase = createClient()
-    try {
-      const { error } = await supabase.from("products").delete().eq("id", id)
-      if (error) throw error
-      loadAllData()
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Error deleting product")
-    }
+    setConfirmModal({
+      isOpen: true,
+      title: "Delete Product",
+      message: "Are you sure you want to delete this product? This action cannot be undone.",
+      confirmText: "Delete",
+      cancelText: "Cancel",
+      onConfirm: async () => {
+        const supabase = createClient()
+        try {
+          const { error } = await supabase.from("products").delete().eq("id", id)
+          if (error) throw error
+          showAlert("Product deleted successfully!", "success", "Success")
+          setConfirmModal({ ...confirmModal, isOpen: false })
+          loadAllData()
+        } catch (err) {
+          showAlert(err instanceof Error ? err.message : "Error deleting product", "error", "Error")
+          setConfirmModal({ ...confirmModal, isOpen: false })
+        }
+      }
+    })
   }
 
   // ---------- Order status helpers ----------
@@ -409,17 +584,6 @@ export default function AdminPage() {
     rejected: [],
   }
 
-  async function updateOrderStatus(orderId: string, newStatus: string) {
-    const supabase = createClient()
-    try {
-      const { error } = await supabase.from("orders").update({ status: newStatus, updated_at: new Date().toISOString() }).eq("id", orderId)
-      if (error) throw error
-      loadAllData()
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Error updating order")
-    }
-  }
-
   // ---------- Promotions: create/update ----------
   // Upload slide files (client File list), store URLs into promotion_slides
   async function handleCreatePromotion() {
@@ -427,15 +591,17 @@ export default function AdminPage() {
     try {
       // 1. create promotion row
       const toUTC = (local: string) => new Date(local + ":00").toISOString()
-      const { data: promoRow, error: promoErr } = await supabase.from("promotions").insert({
+      const { data: promoRowArray, error: promoErr } = await supabase.from("promotions").insert({
         name: promoForm.name,
         mode: promoForm.mode,
         start_at: promoForm.mode === "auto" ? toUTC(promoForm.start_at) : null,
         end_at: promoForm.mode === "auto" ? toUTC(promoForm.end_at) : null,
         is_active: promoForm.is_active,
-      }).select().single()
+      }).select()
       if (promoErr) throw promoErr
 
+      const promoRow = promoRowArray && promoRowArray.length > 0 ? promoRowArray[0] : null
+      if (!promoRow) throw new Error("Failed to create promotion")
       const promoId = promoRow.id
 
       // 2. upload slides and insert promotion_slides
@@ -476,6 +642,30 @@ export default function AdminPage() {
         if (ipErr) console.warn("promotion_products insert err", ipErr)
       }
 
+      // Create notifications for all users about new promotion
+      try {
+        const { data: allUsers } = await supabase
+          .from("profiles")
+          .select("id")
+          .limit(1000)
+
+        if (allUsers && allUsers.length > 0) {
+          const userNotifications = allUsers.map((u: any) => ({
+            user_id: u.id,
+            type: "new_promotion",
+            title: "New Promotion Available",
+            message: `Check out our new promotion: ${promoForm.name}`,
+            link: "/products",
+            read: false,
+          }))
+
+          const { error: notifErr } = await supabase.from("notifications").insert(userNotifications)
+          if (notifErr) console.warn("user notification insert err", notifErr)
+        }
+      } catch (err) {
+        console.warn("Failed to create user notifications for promotion:", err)
+      }
+
       // reset form
       setPromoForm({ name: "", mode: "manual", start_at: "", end_at: "", is_active: true })
       setPromoSlidesFiles([])
@@ -483,9 +673,9 @@ export default function AdminPage() {
       setSelectedPromoSlideIndex(0)
       setPromoSelectedProducts({})
       loadAllData()
-      alert("Promotion created")
+      showAlert("Promotion created!", "success", "Success")
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Error creating promotion")
+      showAlert(err instanceof Error ? err.message : "Error creating promotion", "error", "Error")
     }
   }
 
@@ -734,10 +924,75 @@ export default function AdminPage() {
         {/* Products Tab */}
         {tab === "products" && (
           <div>
-            <button onClick={() => { setEditingProduct(null); setProductForm({ name: "", price: "", image_url: "", stock: "", category: "", categories: [], details: "" }); setImageFiles([]); setSelectedImageIndex(0); setProductAutoPromo({ enabled: false, discount_percent: 0 }); setShowProductForm(!showProductForm) }} className="mb-6 flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:opacity-90"><Plus size={18} /> Add Product</button>
+            <div className="mb-6 flex gap-2 items-center flex-wrap">
+              <button onClick={() => { setEditingProduct(null); setProductForm({ name: "", price: "", image_url: "", stock: "", category: "", categories: [], details: "" }); setImageFiles([]); setSelectedImageIndex(0); setProductAutoPromo({ enabled: false, discount_percent: 0 }); setShowProductForm(!showProductForm) }} className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:opacity-90 h-10"><Plus size={18} /> Add Product</button>
+              
+              {/* Search bar */}
+              <input 
+                type="text" 
+                placeholder="Search products..." 
+                value={productSearch}
+                onChange={(e) => setProductSearch(e.target.value)}
+                className="flex-1 min-w-48 px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary transition h-10"
+              />
+              
+              {/* Price filter */}
+              <div className="flex items-center gap-2 h-10">
+                <label className="text-sm font-medium">Price:</label>
+                <input 
+                  type="number" 
+                  placeholder="Min" 
+                  value={productPriceRange.min}
+                  onChange={(e) => setProductPriceRange({...productPriceRange, min: Number(e.target.value)})}
+                  className="w-20 px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary transition"
+                />
+                <span className="text-sm">-</span>
+                <input 
+                  type="number" 
+                  placeholder="Max" 
+                  value={productPriceRange.max}
+                  onChange={(e) => setProductPriceRange({...productPriceRange, max: Number(e.target.value)})}
+                  className="w-20 px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary transition"
+                />
+              </div>
+              
+              {/* Category filter */}
+              <select 
+                multiple
+                size={1}
+                value={productCategoryFilter}
+                onChange={(e) => setProductCategoryFilter(Array.from(e.target.selectedOptions, option => option.value))}
+                className="px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary transition h-10"
+              >
+                <option value="">All Categories</option>
+                {categories.map(cat => (
+                  <option key={cat.id} value={cat.name}>{cat.name}</option>
+                ))}
+              </select>
+              
+              {/* Add Category Button */}
+              <button 
+                onClick={async () => {
+                  const newCatName = prompt("Enter new category name:")
+                  if (!newCatName) return
+                  const supabase = createClient()
+                  try {
+                    const { error } = await supabase.from("category").insert({ name: newCatName.trim() })
+                    if (error) throw error
+                    showAlert("Category added successfully!", "success", "Success")
+                    loadAllData()
+                  } catch (err) {
+                    showAlert(err instanceof Error ? err.message : "Error adding category", "error", "Error")
+                  }
+                }}
+                className="px-4 py-2 bg-primary text-white rounded-lg font-medium hover:opacity-90 h-10"
+              >
+                + Category
+              </button>
+            </div>
 
             {showProductForm && (
-              <div className="border border-border rounded-lg p-6 mb-8 bg-muted/50">
+              <div key={editingProduct?.id || 'new'} className="border border-border rounded-lg p-6 mb-8 bg-muted/50">
                 <h3 className="text-xl font-bold mb-4">{editingProduct ? "Edit Product" : "Add New Product"}</h3>
                 <div className="space-y-4">
                   <input type="text" placeholder="Product Name" value={productForm.name} onChange={(e) => setProductForm({ ...productForm, name: e.target.value })} className="w-full px-4 py-2 border border-border rounded-lg" />
@@ -752,9 +1007,13 @@ export default function AdminPage() {
                         <div className="mb-4">
                           <div className="w-full h-64 bg-muted rounded-lg overflow-hidden mb-3">
                             <img 
-                              src={imageFiles[selectedImageIndex]?.preview} 
+                              src={imageFiles[selectedImageIndex]?.preview || "/placeholder.svg"} 
                               alt="preview" 
                               className="w-full h-full object-cover" 
+                              onError={(e) => {
+                                console.error("[Admin] Image load error, preview:", imageFiles[selectedImageIndex]?.preview)
+                                e.currentTarget.src = "/placeholder.svg"
+                              }}
                             />
                           </div>
                           {/* Image Thumbnails */}
@@ -762,10 +1021,14 @@ export default function AdminPage() {
                             {imageFiles.map((imgData, idx) => (
                               <div key={idx} className="relative flex-shrink-0">
                                 <img 
-                                  src={imgData.preview}
+                                  src={imgData.preview || "/placeholder.svg"}
                                   alt={`img-${idx}`}
                                   onClick={() => setSelectedImageIndex(idx)}
                                   className={`w-16 h-16 object-cover rounded cursor-pointer border-2 ${selectedImageIndex === idx ? 'border-primary' : 'border-border'}`}
+                                  onError={(e) => {
+                                    console.error("[Admin] Thumbnail load error, URL:", imgData.preview)
+                                    e.currentTarget.src = "/placeholder.svg"
+                                  }}
                                 />
                                 <button
                                   onClick={() => {
@@ -790,7 +1053,7 @@ export default function AdminPage() {
                           const files = Array.from(e.target.files || [])
                           const totalImages = imageFiles.length + files.length
                           if (totalImages > 10) {
-                            alert("Maximum 10 images allowed")
+                            showAlert("Maximum 10 images allowed", "warning", "Limit Exceeded")
                             return
                           }
                           // Create preview URLs for new files
@@ -806,13 +1069,33 @@ export default function AdminPage() {
                     </div>
                   </div>
 
-                  {/* Category Selection - Multiple */}
+                  {/* Category Selection - Multiple with Tags */}
                   <div>
-                    <label className="text-sm mb-2 block font-medium">Categories ({categories.length}) - Select Multiple</label>
-                    <div className="border border-border rounded-lg p-3 max-h-48 overflow-y-auto bg-blue-50">
+                    <label className="text-sm mb-3 block font-medium">Categories - Select Multiple</label>
+                    
+                    {/* Selected Categories as Tags/Chips */}
+                    {productForm.categories.length > 0 && (
+                      <div className="mb-3 flex flex-wrap gap-2">
+                        {productForm.categories.map((cat, idx) => (
+                          <div key={idx} className="inline-flex items-center gap-2 bg-primary text-primary-foreground px-3 py-1 rounded-full text-sm font-medium">
+                            <span>{cat}</span>
+                            <button
+                              type="button"
+                              onClick={() => setProductForm({ ...productForm, categories: productForm.categories.filter(c => c !== cat) })}
+                              className="ml-1 hover:opacity-70 font-bold text-lg leading-none"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    
+                    {/* Category Checkboxes */}
+                    <div className="border border-border rounded-lg p-3 max-h-48 overflow-y-auto bg-primary-50 space-y-1">
                       {categories.length > 0 ? (
                         categories.map((c) => (
-                          <label key={c.id} className="flex items-center gap-2 py-2">
+                          <label key={c.id} className="flex items-center gap-2 py-2 px-2 rounded cursor-pointer transition">
                             <input
                               type="checkbox"
                               checked={productForm.categories.includes(c.name)}
@@ -830,26 +1113,57 @@ export default function AdminPage() {
                         ))
                       ) : (
                         <>
-                          <label className="flex items-center gap-2 py-2">
-                            <input type="checkbox" onChange={(e) => { if (e.target.checked) setProductForm({ ...productForm, categories: [...productForm.categories, "Furniture"] }) }} className="w-4 h-4" />
+                          <label className="flex items-center gap-2 py-2 px-2 hover:bg-blue-100 rounded cursor-pointer transition">
+                            <input 
+                              type="checkbox" 
+                              checked={productForm.categories.includes("Furniture")}
+                              onChange={(e) => { 
+                                if (e.target.checked) setProductForm({ ...productForm, categories: [...productForm.categories, "Furniture"] }) 
+                                else setProductForm({ ...productForm, categories: productForm.categories.filter(c => c !== "Furniture") })
+                              }} 
+                              className="w-4 h-4" 
+                            />
                             <span className="text-sm">Furniture</span>
                           </label>
-                          <label className="flex items-center gap-2 py-2">
-                            <input type="checkbox" onChange={(e) => { if (e.target.checked) setProductForm({ ...productForm, categories: [...productForm.categories, "Lighting"] }) }} className="w-4 h-4" />
+                          <label className="flex items-center gap-2 py-2 px-2 hover:bg-blue-100 rounded cursor-pointer transition">
+                            <input 
+                              type="checkbox" 
+                              checked={productForm.categories.includes("Lighting")}
+                              onChange={(e) => { 
+                                if (e.target.checked) setProductForm({ ...productForm, categories: [...productForm.categories, "Lighting"] }) 
+                                else setProductForm({ ...productForm, categories: productForm.categories.filter(c => c !== "Lighting") })
+                              }} 
+                              className="w-4 h-4" 
+                            />
                             <span className="text-sm">Lighting</span>
                           </label>
-                          <label className="flex items-center gap-2 py-2">
-                            <input type="checkbox" onChange={(e) => { if (e.target.checked) setProductForm({ ...productForm, categories: [...productForm.categories, "Decor"] }) }} className="w-4 h-4" />
+                          <label className="flex items-center gap-2 py-2 px-2 hover:bg-blue-100 rounded cursor-pointer transition">
+                            <input 
+                              type="checkbox" 
+                              checked={productForm.categories.includes("Decor")}
+                              onChange={(e) => { 
+                                if (e.target.checked) setProductForm({ ...productForm, categories: [...productForm.categories, "Decor"] }) 
+                                else setProductForm({ ...productForm, categories: productForm.categories.filter(c => c !== "Decor") })
+                              }} 
+                              className="w-4 h-4" 
+                            />
                             <span className="text-sm">Decor</span>
                           </label>
-                          <label className="flex items-center gap-2 py-2">
-                            <input type="checkbox" onChange={(e) => { if (e.target.checked) setProductForm({ ...productForm, categories: [...productForm.categories, "Accessories"] }) }} className="w-4 h-4" />
+                          <label className="flex items-center gap-2 py-2 px-2 hover:bg-blue-100 rounded cursor-pointer transition">
+                            <input 
+                              type="checkbox" 
+                              checked={productForm.categories.includes("Accessories")}
+                              onChange={(e) => { 
+                                if (e.target.checked) setProductForm({ ...productForm, categories: [...productForm.categories, "Accessories"] }) 
+                                else setProductForm({ ...productForm, categories: productForm.categories.filter(c => c !== "Accessories") })
+                              }} 
+                              className="w-4 h-4" 
+                            />
                             <span className="text-sm">Accessories</span>
                           </label>
                         </>
                       )}
                     </div>
-                    {productForm.categories.length > 0 && <p className="text-xs text-green-600 mt-2">Selected: {productForm.categories.join(", ")}</p>}
                     {categories.length === 0 && <p className="text-xs text-yellow-600 mt-1">No categories loaded, using defaults</p>}
                   </div>
 
@@ -874,81 +1188,34 @@ export default function AdminPage() {
                     />
                   </div>
 
-                  {/* Product Promotion Section */}
-                  <div className="border border-border rounded-lg p-4 bg-blue-50">
-                    <h4 className="font-semibold mb-4">Product Promotion</h4>
-                    <div className="space-y-4">
-                      <div className="flex items-center gap-6">
-                        <label className="flex items-center gap-2">
-                          <input
-                            type="radio"
-                            checked={productPromoMode === "none"}
-                            onChange={() => setProductPromoMode("none")}
-                            className="w-4 h-4"
-                          />
-                          <span className="text-sm">No Promotion</span>
-                        </label>
-                        <label className="flex items-center gap-2">
-                          <input
-                            type="radio"
-                            checked={productPromoMode === "manual"}
-                            onChange={() => setProductPromoMode("manual")}
-                            className="w-4 h-4"
-                          />
-                          <span className="text-sm">Manual Promotion</span>
-                        </label>
-                        <label className="flex items-center gap-2">
-                          <input
-                            type="radio"
-                            checked={productPromoMode === "auto"}
-                            onChange={() => setProductPromoMode("auto")}
-                            className="w-4 h-4"
-                          />
-                          <span className="text-sm">Auto Promotion</span>
-                        </label>
-                      </div>
-                      
-                      {(productPromoMode === "manual" || productPromoMode === "auto") && (
-                        <div className="ml-4 space-y-3 pt-3 border-t border-blue-200">
-                          <div>
-                            <label className="text-sm mb-2 block">Discount Percentage</label>
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="number"
-                                min="1"
-                                max="100"
-                                value={productPromoMode === "auto" ? productAutoPromo.discount_percent : productManualPromo.discount_percent}
-                                onChange={(e) => {
-                                  const val = Number(e.target.value)
-                                  if (productPromoMode === "auto") {
-                                    setProductAutoPromo({ ...productAutoPromo, discount_percent: val })
-                                  } else {
-                                    setProductManualPromo({ ...productManualPromo, discount_percent: val })
-                                  }
-                                }}
-                                className="w-24 px-3 py-2 border border-border rounded-lg"
-                              />
-                              <span className="text-sm text-muted-foreground">%</span>
-                            </div>
-                          </div>
-                          <p className="text-xs text-blue-700">
-                            ℹ️ {productPromoMode === "auto" ? "Auto promotion will create a 30-day promotion with this discount." : "Manual promotion - you select which products get this discount."}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
                   <div className="flex gap-2">
-                    <button onClick={handleSaveProduct} className="px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:opacity-90">Save</button>
-                    <button onClick={() => { setShowProductForm(false); setEditingProduct(null); setImageFiles([]); setSelectedImageIndex(0) }} className="px-4 py-2 border border-border rounded-lg font-medium hover:bg-muted">Cancel</button>
+                    <button onClick={handleSaveProduct} className="px-5 py-2.5 bg-primary text-white rounded-xl font-semibold hover:from-green-700 hover:opacity-90">Save</button>
+                    <button onClick={() => { setShowProductForm(false); setEditingProduct(null); setImageFiles([]); setSelectedImageIndex(0) }} className="px-5 py-2.5 border border-gray-300 text-gray-700 rounded-xl font-semibold hover:bg-gray-100 transition-all">Cancel</button>
                   </div>
                 </div>
               </div>
             )}
 
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {products.map((product) => (
+              {products
+                .filter(product => {
+                  // Search filter
+                  if (productSearch && !product.name.toLowerCase().includes(productSearch.toLowerCase())) {
+                    return false
+                  }
+                  // Price filter
+                  if (product.price < productPriceRange.min || product.price > productPriceRange.max) {
+                    return false
+                  }
+                  // Category filter
+                  if (productCategoryFilter.length > 0) {
+                    const productCategories = product.category?.split(",").map(c => c.trim()) || []
+                    const hasMatchingCategory = productCategoryFilter.some(filter => productCategories.includes(filter))
+                    if (!hasMatchingCategory) return false
+                  }
+                  return true
+                })
+                .map((product) => (
                 <div key={product.id} className="border border-border rounded-lg overflow-hidden">
                   <img src={product.image_url || "/placeholder.svg"} alt={product.name} className="w-full h-48 object-cover" />
                   <div className="p-4">
@@ -957,25 +1224,109 @@ export default function AdminPage() {
                     <div className="flex gap-2">
                       <button onClick={() => { 
                         setEditingProduct(product)
+                        // Parse categories from comma-separated string
+                        const parsedCategories = product.category 
+                          ? product.category.split(",").map((cat: string) => cat.trim()).filter((cat: string) => cat.length > 0)
+                          : []
+                        
                         setProductForm({ 
                           name: product.name, 
                           price: product.price.toString(), 
                           image_url: product.image_url, 
                           stock: product.stock.toString(), 
                           category: product.category || "", 
-                          categories: [], 
+                          categories: parsedCategories, 
                           details: product.details || "" 
                         })
-                        // Load existing images
-                        if (product.image_url && product.image_url.length > 0) {
-                          const existingImages = product.image_url.map((url: string) => ({
-                            file: new File([], ''),
-                            preview: url,
-                            isExisting: true
-                          }))
-                          setImageFiles(existingImages as any)
+                        // Load existing images - parse carefully
+                        let imageUrls: string[] = []
+                        if (product.image_urls) {
+                          console.log("[Admin Edit] Raw image_urls from DB:", product.image_urls, "Type:", typeof product.image_urls)
+                          if (typeof product.image_urls === 'string') {
+                            const rawStr = (product.image_urls as string).trim()
+                            try {
+                              // Try JSON parse
+                              let parsed: any = JSON.parse(rawStr)
+                              
+                              // Handle double-stringify case
+                              if (typeof parsed === 'string') {
+                                try {
+                                  parsed = JSON.parse(parsed)
+                                } catch {
+                                  // Not double-stringified, keep as is
+                                }
+                              }
+                              
+                              // Ensure it's an array
+                              if (Array.isArray(parsed)) {
+                                imageUrls = parsed.filter((url: any) => typeof url === 'string' && url.length > 0)
+                              } else if (typeof parsed === 'string') {
+                                imageUrls = [parsed]
+                              }
+                            } catch (e) {
+                              // If JSON.parse fails, try to clean it up
+                              console.warn("[Admin] Failed to JSON.parse image_urls:", rawStr.substring(0, 100), e)
+                              
+                              // Try removing surrounding brackets if present
+                              let cleaned = rawStr
+                              if (cleaned.startsWith('[') && cleaned.endsWith(']')) {
+                                cleaned = cleaned.slice(1, -1)
+                              }
+                              // Try removing quotes
+                              cleaned = cleaned.replace(/^\"|\"$/g, '').replace(/^'|'$/g, '').trim()
+                              
+                              if (cleaned && cleaned.length > 0 && cleaned.startsWith('http')) {
+                                imageUrls = [cleaned]
+                              }
+                            }
+                          } else if (Array.isArray(product.image_urls)) {
+                            imageUrls = product.image_urls.filter((url: any) => typeof url === 'string' && url.length > 0)
+                          }
+                        }
+                        
+                        console.log("[Admin Edit] Parsed imageUrls:", imageUrls)
+                        
+                        if (imageUrls.length > 0) {
+                          // Validate all URLs before setting - strip quotes and check
+                          const validUrls = imageUrls
+                            .map((url: any) => {
+                              // Strip any surrounding quotes
+                              let cleaned = String(url || '').trim()
+                              cleaned = cleaned.replace(/^"|"$/g, '').replace(/^'|'$/g, '')
+                              return cleaned
+                            })
+                            .filter(url => {
+                              const isValid = typeof url === 'string' && url.length > 0 && url.startsWith('http')
+                              if (!isValid && url.length > 0) {
+                                console.warn("[Admin Edit] Invalid URL filtered out:", url)
+                              }
+                              return isValid
+                            })
+                          
+                          if (validUrls.length > 0) {
+                            const existingImages = validUrls.map((url: string) => ({
+                              file: new File([], ''),
+                              preview: url,
+                              isExisting: true
+                            }))
+                            console.log("[Admin Edit] Setting imageFiles with", validUrls.length, "valid URLs:", validUrls)
+                            setImageFiles(existingImages as any)
+                            setSelectedImageIndex(0)
+                          } else {
+                            console.warn("[Admin Edit] No valid URLs found, using image_url fallback")
+                            if (product.image_url && product.image_url.startsWith('http')) {
+                              setImageFiles([{ file: new File([], ''), preview: product.image_url, isExisting: true }] as any)
+                              setSelectedImageIndex(0)
+                            } else {
+                              setImageFiles([])
+                            }
+                          }
+                        } else if (product.image_url && product.image_url.startsWith('http')) {
+                          console.log("[Admin Edit] No image_urls, using image_url fallback:", product.image_url)
+                          setImageFiles([{ file: new File([], ''), preview: product.image_url, isExisting: true }] as any)
                           setSelectedImageIndex(0)
                         } else {
+                          console.log("[Admin Edit] No images at all")
                           setImageFiles([])
                           setSelectedImageIndex(0)
                         }
@@ -993,7 +1344,18 @@ export default function AdminPage() {
 
         {/* Users Tab */}
         {tab === "users" && (
-          <div className="border border-border rounded-lg overflow-hidden">
+          <div>
+            <div className="mb-6">
+              <input 
+                type="text" 
+                placeholder="Search users by email..." 
+                value={userSearch}
+                onChange={(e) => setUserSearch(e.target.value)}
+                className="w-full px-4 py-2 border border-border rounded-lg"
+              />
+            </div>
+            
+            <div className="border border-border rounded-lg overflow-hidden">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-border bg-muted">
@@ -1003,11 +1365,13 @@ export default function AdminPage() {
                 </tr>
               </thead>
               <tbody>
-                {users.map((user) => (
+                {users
+                  .filter(user => !userSearch || user.email.toLowerCase().includes(userSearch.toLowerCase()))
+                  .map((user) => (
                   <tr key={user.id} className="border-b border-border hover:bg-muted/50">
                     <td className="px-6 py-4">{user.email}</td>
                     <td className="px-6 py-4 text-sm text-muted-foreground">{new Date(user.created_at).toLocaleDateString()}</td>
-                    <td className="px-6 py-4"><button onClick={() => { setSelectedUser(user); setIsModalOpen(true) }} className="text-primary hover:underline">View Orders</button></td>
+                    <td className="px-6 py-4"><button onClick={() => { setSelectedUser(user); setIsModalOpen(true) }} className="text-primary hover:underline">Edit</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -1016,7 +1380,7 @@ export default function AdminPage() {
             {isModalOpen && selectedUser && (
               <Modal onClose={() => { setIsModalOpen(false); setSelectedUser(null); setUserOrders([]); setIsEditingUserProfile(false) }}>
                 <div className="space-y-6 max-h-screen overflow-y-auto">
-                  <button onClick={() => { setIsModalOpen(false); setSelectedUser(null); setUserOrders([]); setIsEditingUserProfile(false) }} className="p-2 hover:bg-red-100 text-red-600 rounded-lg transition self-start">X</button>
+                  <button onClick={() => { setIsModalOpen(false); setSelectedUser(null); setUserOrders([]); setIsEditingUserProfile(false) }} className="lucide lucide-x">X</button>
                   
                   {/* User Profile Section */}
                   <div>
@@ -1125,9 +1489,9 @@ export default function AdminPage() {
                                 if (error) throw error
                                 setIsEditingUserProfile(false)
                                 loadAllData()
-                                alert("Profile updated successfully")
+                                showAlert("Profile updated successfully!", "success", "Success")
                               } catch (err) {
-                                alert(err instanceof Error ? err.message : "Error updating profile")
+                                showAlert(err instanceof Error ? err.message : "Error updating profile", "error", "Error")
                               }
                             }}
                             className="flex-1 px-3 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700"
@@ -1149,27 +1513,37 @@ export default function AdminPage() {
                       <div className="flex gap-2 mb-6">
                         <button 
                           onClick={() => setIsEditingUserProfile(true)}
-                          className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                          className="px-3 py-1 text-sm bg-primary text-white rounded hover:opacity-90"
                         >
                           Edit Profile
                         </button>
                         <button 
-                          onClick={async () => {
-                            if (!confirm("Are you sure you want to delete this user?")) return
-                            const supabase = createClient()
-                            try {
-                              const { error } = await supabase.from("profiles").delete().eq("id", selectedUser.id)
-                              if (error) throw error
-                              setIsModalOpen(false)
-                              setSelectedUser(null)
-                              setIsEditingUserProfile(false)
-                              loadAllData()
-                              alert("User deleted successfully")
-                            } catch (err) {
-                              alert(err instanceof Error ? err.message : "Error deleting user")
-                            }
+                          onClick={() => {
+                            setConfirmModal({
+                              isOpen: true,
+                              title: "Delete User",
+                              message: "Are you sure you want to delete this user? This action cannot be undone.",
+                              confirmText: "Delete",
+                              cancelText: "Cancel",
+                              onConfirm: async () => {
+                                const supabase = createClient()
+                                try {
+                                  const { error } = await supabase.from("profiles").delete().eq("id", selectedUser!.id)
+                                  if (error) throw error
+                                  setIsModalOpen(false)
+                                  setSelectedUser(null)
+                                  setIsEditingUserProfile(false)
+                                  setConfirmModal({ ...confirmModal, isOpen: false })
+                                  showAlert("User deleted successfully!", "success", "Success")
+                                  loadAllData()
+                                } catch (err) {
+                                  showAlert(err instanceof Error ? err.message : "Error deleting user", "error", "Error")
+                                  setConfirmModal({ ...confirmModal, isOpen: false })
+                                }
+                              }
+                            })
                           }}
-                          className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700"
+                          className="px-3 py-1 text-sm border border-red-300 text-red-600 rounded hover:bg-red-50 transition flex items-center justify-center gap-1"
                         >
                           Delete User
                         </button>
@@ -1200,13 +1574,66 @@ export default function AdminPage() {
                 </div>
               </Modal>
             )}
+            </div>
           </div>
         )}
 
         {/* Orders Tab */}
         {tab === "orders" && (
           <div className="space-y-4">
-            {orders.map((order) => (
+            <div className="mb-6 flex gap-2 items-end flex-wrap">
+              {/* Search bar */}
+              <input 
+                type="text" 
+                placeholder="Search by order number..." 
+                value={orderSearch}
+                onChange={(e) => setOrderSearch(e.target.value)}
+                className="flex-1 min-w-48 px-4 py-2 border border-border rounded-lg"
+              />
+              
+              {/* Status filter buttons */}
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => setOrderStatusFilter([])}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition ${orderStatusFilter.length === 0 ? 'bg-primary text-primary-foreground' : 'border border-border hover:bg-muted'}`}
+                >
+                  All
+                </button>
+                {["pending", "confirmed", "shipping", "delivered", "rejected"].map(status => (
+                  <button 
+                    key={status}
+                    onClick={() => {
+                      if (orderStatusFilter.includes(status)) {
+                        setOrderStatusFilter(orderStatusFilter.filter(s => s !== status))
+                      } else {
+                        setOrderStatusFilter([...orderStatusFilter, status])
+                      }
+                    }}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium capitalize transition ${
+                      orderStatusFilter.includes(status) 
+                        ? 'bg-primary text-primary-foreground' 
+                        : 'border border-border hover:bg-muted'
+                    }`}
+                  >
+                    {status}
+                  </button>
+                ))}
+              </div>
+            </div>
+            
+            {orders
+              .filter(order => {
+                // Search filter
+                if (orderSearch && !order.order_number.toLowerCase().includes(orderSearch.toLowerCase())) {
+                  return false
+                }
+                // Status filter
+                if (orderStatusFilter.length > 0 && !orderStatusFilter.includes(order.status)) {
+                  return false
+                }
+                return true
+              })
+              .map((order) => (
               <div key={order.id} className="border border-border rounded-lg p-6">
                 <div className="flex items-center justify-between mb-4">
                   <div>
@@ -1219,30 +1646,21 @@ export default function AdminPage() {
                   <span className={`px-3 py-1 rounded text-sm font-medium ${getStatusColor(order.status)}`}>{order.status}</span>
                 </div>
 
-                {/* ACTION: replace buttons with select dropdown (keeps transition rules) */}
-                <div className="flex gap-2 flex-wrap items-center">
-                  <select
-                    value={order.status}
-                    onChange={async (e) => {
-                      const newStatus = e.target.value
-                      if (!allowedTransitions[order.status].includes(newStatus)) {
-                        alert("Transition not allowed")
-                        return
-                      }
-                      if (newStatus === "rejected" && !confirm("Bạn có chắc muốn huỷ đơn này?")) return
-                      await updateOrderStatus(order.id, newStatus)
-                    }}
-                    className="px-3 py-2 border border-border rounded-lg bg-white text-sm"
-                  >
-                    <option value="pending">pending</option>
-                    <option value="confirmed">confirmed</option>
-                    <option value="shipping">shipping</option>
-                    <option value="delivered">delivered</option>
-                    <option value="rejected">rejected</option>
-                  </select>
-
-                  <span className={`px-2 py-1 text-xs rounded ${getStatusColor(order.status)}`}>{order.status}</span>
+                <div className="flex gap-2 flex-wrap">
+                  {allowedTransitions[order.status].map((status) => (
+                    <button
+                      key={status}
+                      onClick={() => updateOrderStatus(order.id, status)}
+                      className="px-3 py-2 text-sm bg-primary text-primary-foreground rounded hover:opacity-90 transition capitalize"
+                    >
+                      Mark as {status}
+                    </button>
+                  ))}
+                  {allowedTransitions[order.status].length === 0 && (
+                    <p className="text-sm text-muted-foreground">No status transitions available</p>
+                  )}
                 </div>
+
               </div>
             ))}
           </div>
@@ -1251,26 +1669,16 @@ export default function AdminPage() {
         {/* Promotions Tab */}
         {tab === "promotions" && (
           <div>
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
               <h2 className="text-2xl font-semibold">Promotions</h2>
+              <input 
+                type="text" 
+                placeholder="Search promotions..." 
+                value={promoSearch}
+                onChange={(e) => setPromoSearch(e.target.value)}
+                className="flex-1 min-w-48 px-4 py-2 border border-border rounded-lg"
+              />
               <button onClick={() => { setSelectedPromotion(null); setPromoForm({ name: "", mode: "manual", start_at: "", end_at: "", is_active: true }); setPromoSlidesFiles([]); setPromoSlidesPreview([]); setSelectedPromoSlideIndex(0); setPromoSelectedProducts({}) }} className="px-4 py-2 bg-primary text-primary-foreground rounded">New Promotion</button>
-            </div>
-
-            {/* Promotion Mode & Schedule Form (before Products)  */}
-            <div className="border border-border rounded-lg p-6 mb-6">
-              <h3 className="text-lg font-semibold mb-4">Promotion Settings</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="mr-3"><input type="radio" name="mode" checked={promoForm.mode === "manual"} onChange={() => setPromoForm({ ...promoForm, mode: "manual" })} /> Manual</label>
-                  <label><input type="radio" name="mode" checked={promoForm.mode === "auto"} onChange={() => setPromoForm({ ...promoForm, mode: "auto" })} /> Auto</label>
-                </div>
-                {promoForm.mode === "auto" && (
-                  <>
-                    <input type="datetime-local" value={promoForm.start_at} onChange={(e) => setPromoForm({ ...promoForm, start_at: e.target.value })} className="px-3 py-2 border border-border rounded" placeholder="Start date" />
-                    <input type="datetime-local" value={promoForm.end_at} onChange={(e) => setPromoForm({ ...promoForm, end_at: e.target.value })} className="px-3 py-2 border border-border rounded" placeholder="End date" />
-                  </>
-                )}
-              </div>
             </div>
 
             {/* SEPARATED: Promotion Slides Management */}
@@ -1288,22 +1696,33 @@ export default function AdminPage() {
                       <div key={slide.id} className="relative w-32 h-32 rounded-lg overflow-hidden border border-border group">
                         <img src={slide.image_url} alt={`slide-${slide.id}`} className="w-full h-full object-cover" />
                         <button
-                          onClick={async () => {
-                            if (!confirm("Delete this slide?")) return
-                            const supabase = createClient()
-                            try {
-                              // Extract file path from URL for deletion
-                              const urlParts = slide.image_url.split("promotion_images/")
-                              if (urlParts.length > 1) {
-                                const filePath = decodeURIComponent(urlParts[1])
-                                await supabase.storage.from("promotion_images").remove([filePath])
+                          onClick={() => {
+                            setConfirmModal({
+                              isOpen: true,
+                              title: "Delete Slide",
+                              message: "Are you sure you want to delete this slide?",
+                              confirmText: "Delete",
+                              cancelText: "Cancel",
+                              onConfirm: async () => {
+                                const supabase = createClient()
+                                try {
+                                  // Extract file path from URL for deletion
+                                  const urlParts = slide.image_url.split("promotion_images/")
+                                  if (urlParts.length > 1) {
+                                    const filePath = decodeURIComponent(urlParts[1])
+                                    await supabase.storage.from("promotion_images").remove([filePath])
+                                  }
+                                  // Delete from database
+                                  await supabase.from("promotion_slides").delete().eq("id", slide.id)
+                                  setPromoSlides(promoSlides.filter(s => s.id !== slide.id))
+                                  setConfirmModal({ ...confirmModal, isOpen: false })
+                                  showAlert("Slide deleted successfully!", "success", "Success")
+                                } catch (err) {
+                                  showAlert(err instanceof Error ? err.message : "Error deleting slide", "error", "Error")
+                                  setConfirmModal({ ...confirmModal, isOpen: false })
+                                }
                               }
-                              // Delete from database
-                              await supabase.from("promotion_slides").delete().eq("id", slide.id)
-                              setPromoSlides(promoSlides.filter(s => s.id !== slide.id))
-                            } catch (err) {
-                              alert(err instanceof Error ? err.message : "Error deleting slide")
-                            }
+                            })
                           }}
                           className="absolute top-1 right-1 bg-red-500 text-white w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition font-bold"
                         >×</button>
@@ -1348,7 +1767,7 @@ export default function AdminPage() {
                   <button 
                     onClick={async () => {
                       if (promoSlidesFiles.length === 0) {
-                        alert("Please add at least one slide")
+                        showAlert("Please add at least one slide", "warning", "Missing Slides")
                         return
                       }
                       // Upload slides only - independent of promotion
@@ -1367,14 +1786,14 @@ export default function AdminPage() {
                             display_order: promoSlides.length
                           })
                         }
-                        alert("Slides uploaded successfully!")
+                        showAlert("Slides uploaded successfully!", "success", "Success")
                         setPromoSlidesFiles([])
                         loadAllData()
                       } catch (err) {
-                        alert(err instanceof Error ? err.message : "Error uploading slides")
+                        showAlert(err instanceof Error ? err.message : "Error uploading slides", "error", "Error")
                       }
                     }}
-                    className="px-4 py-2 bg-green-600 text-white rounded font-medium hover:bg-green-700"
+                    className="px-4 py-2 bg-primary text-primary-foreground rounded"
                   >
                     Upload {promoSlidesFiles.length} Slide{promoSlidesFiles.length !== 1 ? 's' : ''}
                   </button>
@@ -1392,11 +1811,25 @@ export default function AdminPage() {
                 <input placeholder="E.g. Summer Sale, Black Friday..." value={promoForm.name} onChange={(e) => setPromoForm({ ...promoForm, name: e.target.value })} className="w-full px-3 py-2 border border-border rounded" />
               </div>
 
+              <h3 className="text-lg font-semibold mb-4">Promotion Settings</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="mr-3"><input type="radio" name="mode" checked={promoForm.mode === "manual"} onChange={() => setPromoForm({ ...promoForm, mode: "manual" })} /> Manual</label>
+                  <label><input type="radio" name="mode" checked={promoForm.mode === "auto"} onChange={() => setPromoForm({ ...promoForm, mode: "auto" })} /> Auto</label>
+                </div>
+                {promoForm.mode === "auto" && (
+                  <>
+                    <label>Start date <input type="datetime-local" value={promoForm.start_at} onChange={(e) => setPromoForm({ ...promoForm, start_at: e.target.value })} className="px-3 py-2 border border-border rounded" placeholder="Start date" /></label>
+                    <label>End date <input type="datetime-local" value={promoForm.end_at} onChange={(e) => setPromoForm({ ...promoForm, end_at: e.target.value })} className="px-3 py-2 border border-border rounded" placeholder="End date" /></label>
+                  </>
+                )}
+              </div>
+
               {/* Select Products */}
-              <h4 className="font-medium text-sm mb-3">Select Products & Set Discount %</h4>
+              <h3 className="text-lg font-semibold mb-4">Products</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-64 overflow-y-auto border p-3 rounded bg-muted/30">
                 {products.map(p => (
-                  <div key={p.id} className="flex items-center gap-3 p-2 bg-white rounded border border-border">
+                  <div key={p.id} className="flex items-center gap-3 p-2 bg-white rounded">
                     <input type="checkbox" checked={!!promoSelectedProducts[p.id]} onChange={() => toggleProductSelect(p.id)} />
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-sm">{p.name}</p>
@@ -1409,7 +1842,7 @@ export default function AdminPage() {
                 ))}
               </div>
               <div className="flex gap-2 mt-4">
-                <button onClick={handleCreatePromotion} className="px-4 py-2 bg-blue-600 text-white rounded font-medium hover:bg-blue-700">Create Promotion (with products)</button>
+                <button onClick={handleCreatePromotion} className="px-4 py-2 bg-primary text-primary-foreground rounded">Create Promotion</button>
                 <button onClick={() => { setPromoForm({ name: "", mode: "manual", start_at: "", end_at: "", is_active: true }); setPromoSlidesFiles([]); setPromoSelectedProducts({}) }} className="px-4 py-2 border border-border rounded">Reset</button>
               </div>
             </div>
@@ -1417,26 +1850,57 @@ export default function AdminPage() {
             {/* Promotions List */}
             <div className="grid gap-4">
               <h3 className="text-lg font-semibold">Active Promotions</h3>
-              {promotions.length === 0 ? (<p className="text-sm text-muted-foreground">No promotions yet</p>) : (
-                promotions.map((pr) => (
+              {promotions
+                .filter(pr => !promoSearch || pr.name.toLowerCase().includes(promoSearch.toLowerCase()))
+                .length === 0 ? 
+                (<p className="text-sm text-muted-foreground">No promotions found</p>) : (
+                promotions
+                  .filter(pr => !promoSearch || pr.name.toLowerCase().includes(promoSearch.toLowerCase()))
+                  .map((pr) => (
                   <div key={pr.id} className="border p-4 rounded">
                     <div className="flex justify-between items-start mb-3">
-                      <button onClick={() => { setSelectedPromotion(pr); setPromoDetailsModalOpen(true) }} className="hover:text-primary cursor-pointer">
+                      <button onClick={async () => { 
+                        const supabase = createClient()
+                        // Load promotion products when clicking on promotion
+                        const { data: promoProds } = await supabase
+                          .from("promotion_products")
+                          .select("*")
+                          .eq("promotion_id", pr.id)
+                        
+                        setSelectedPromotion({ 
+                          ...pr, 
+                          promoProducts: promoProds || [] 
+                        })
+                        setPromoDetailsModalOpen(true) 
+                      }} className="hover:text-primary cursor-pointer">
                         <p className="font-semibold text-lg">{pr.name}</p>
                       </button>
                       <div className="flex gap-2">
                         <button onClick={async () => {
                           const supabase = createClient()
                           const { error } = await supabase.from("promotions").update({ is_active: !pr.is_active }).eq("id", pr.id)
-                          if (error) alert("Error toggling")
+                          if (error) showAlert("Error toggling promotion", "error", "Error")
                           else loadAllData()
                         }} className="px-3 py-2 border rounded text-sm">{pr.is_active ? "Deactivate" : "Activate"}</button>
-                        <button onClick={async () => {
-                          if (!confirm("Delete promotion?")) return
-                          const supabase = createClient()
-                          const { error } = await supabase.from("promotions").delete().eq("id", pr.id)
-                          if (error) alert("Error deleting")
-                          else loadAllData()
+                        <button onClick={() => {
+                          setConfirmModal({
+                            isOpen: true,
+                            title: "Delete Promotion",
+                            message: "Are you sure you want to delete this promotion?",
+                            confirmText: "Delete",
+                            cancelText: "Cancel",
+                            onConfirm: async () => {
+                              const supabase = createClient()
+                              const { error } = await supabase.from("promotions").delete().eq("id", pr.id)
+                              if (error) {
+                                showAlert("Error deleting promotion", "error", "Error")
+                              } else {
+                                showAlert("Promotion deleted successfully!", "success", "Success")
+                                loadAllData()
+                              }
+                              setConfirmModal({ ...confirmModal, isOpen: false })
+                            }
+                          })
                         }} className="px-3 py-2 border text-red-600 rounded text-sm">Delete</button>
                       </div>
                     </div>
@@ -1535,6 +1999,84 @@ export default function AdminPage() {
         )}
 
       </div>
+
+      {/* Alert Modal */}
+      {alertModal.isOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className={`bg-white rounded-lg shadow-lg p-6 max-w-sm w-full mx-4 border-l-4 ${
+            alertModal.type === 'success' ? 'border-green-500 bg-green-50' :
+            alertModal.type === 'error' ? 'border-red-500 bg-red-50' :
+            alertModal.type === 'warning' ? 'border-yellow-500 bg-yellow-50' :
+            'border-blue-500 bg-blue-50'
+          }`}>
+            <div className="flex items-start gap-4">
+              <div className={`text-2xl ${
+                alertModal.type === 'success' ? 'text-green-600' :
+                alertModal.type === 'error' ? 'text-red-600' :
+                alertModal.type === 'warning' ? 'text-yellow-600' :
+                'text-blue-600'
+              }`}>
+                {alertModal.type === 'success' && '✓'}
+                {alertModal.type === 'error' && '✕'}
+                {alertModal.type === 'warning' && '⚠'}
+                {alertModal.type === 'info' && 'ℹ'}
+              </div>
+              <div className="flex-1">
+                <h3 className={`font-bold text-lg ${
+                  alertModal.type === 'success' ? 'text-green-800' :
+                  alertModal.type === 'error' ? 'text-red-800' :
+                  alertModal.type === 'warning' ? 'text-yellow-800' :
+                  'text-blue-800'
+                }`}>{alertModal.title}</h3>
+                <p className={`text-sm mt-2 ${
+                  alertModal.type === 'success' ? 'text-green-700' :
+                  alertModal.type === 'error' ? 'text-red-700' :
+                  alertModal.type === 'warning' ? 'text-yellow-700' :
+                  'text-blue-700'
+                }`}>{alertModal.message}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setAlertModal({ ...alertModal, isOpen: false })}
+              className={`mt-6 w-full py-2 rounded font-medium text-white transition ${
+                alertModal.type === 'success' ? 'bg-green-600 hover:bg-green-700' :
+                alertModal.type === 'error' ? 'bg-red-600 hover:bg-red-700' :
+                alertModal.type === 'warning' ? 'bg-yellow-600 hover:bg-yellow-700' :
+                'bg-blue-600 hover:bg-blue-700'
+              }`}
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal */}
+      {confirmModal.isOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-lg p-6 max-w-sm w-full mx-4">
+            <h3 className="font-bold text-lg mb-3 text-gray-800">{confirmModal.title}</h3>
+            <p className="text-sm text-gray-600 mb-6">{confirmModal.message}</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setConfirmModal({ ...confirmModal, isOpen: false })}
+                className="flex-1 py-2 px-4 border border-border rounded-lg font-medium hover:bg-muted transition"
+              >
+                {confirmModal.cancelText}
+              </button>
+              <button
+                onClick={async () => {
+                  await confirmModal.onConfirm()
+                  setConfirmModal({ ...confirmModal, isOpen: false })
+                }}
+                className="flex-1 py-2 px-4 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition"
+              >
+                {confirmModal.confirmText}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
