@@ -66,6 +66,7 @@ export default function AdminPage() {
   const [productForm, setProductForm] = useState({ name: "", price: "", image_url: "", stock: "", category: "", categories: [] as string[], details: "" })
   const [imageFiles, setImageFiles] = useState<{ file: File; preview: string; isExisting?: boolean }[]>([]) // For preview
   const [selectedImageIndex, setSelectedImageIndex] = useState(0)
+  const [imagesModified, setImagesModified] = useState(false) // Track if images were modified
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([])
   const [productPromoMode, setProductPromoMode] = useState<"none" | "manual" | "auto">("none")
   const [productAutoPromo, setProductAutoPromo] = useState<{ enabled: boolean; discount_percent: number }>({ enabled: false, discount_percent: 0 })
@@ -385,15 +386,13 @@ export default function AdminPage() {
 
     const supabase = createClient()
     try {
-      // Upload ONLY new images (not existing ones)
+      // Separate new files from existing images
+      const newFiles = imageFiles.filter(img => !img.isExisting)
+      const existingImages = imageFiles.filter(img => img.isExisting).map(img => img.preview)
+      
+      // Upload ONLY new files
       const newImageUrls: string[] = []
-      for (const imgData of imageFiles) {
-        // Skip existing images - they already have a preview URL from the database
-        if (imgData.isExisting) {
-          newImageUrls.push(imgData.preview)
-          continue
-        }
-
+      for (const imgData of newFiles) {
         // Skip empty files (fallback check)
         if (!imgData.file || imgData.file.size === 0) {
           console.warn("[Admin] Skipping empty file")
@@ -416,35 +415,24 @@ export default function AdminPage() {
         console.log("[Admin] Uploaded image URL:", cleanUrl)
         newImageUrls.push(cleanUrl)
       }
-      console.log("[Admin] All image URLs (new + existing):", newImageUrls)
       
-      // First image is cover
-      const coverImage = newImageUrls[0] || productForm.image_url
+      // Combine all images: existing + newly uploaded
+      const allImageUrls = [...existingImages, ...newImageUrls]
+      console.log("[Admin] All image URLs - existing:", existingImages.length, "new:", newImageUrls.length, "total:", allImageUrls.length)
+      
       const categoryStr = productForm.categories.join(", ") // Join all selected categories
 
       let savedProduct: any = null
       if (editingProduct) {
-        let allImageUrls = [...newImageUrls]
-        // If no new images, keep existing ones
-        if (allImageUrls.length === 0) {
-          let existingImageUrls: string[] = []
-          if (editingProduct.image_urls) {
-            if (typeof editingProduct.image_urls === 'string') {
-              try {
-                existingImageUrls = JSON.parse(editingProduct.image_urls)
-              } catch {
-                existingImageUrls = [editingProduct.image_urls]
-              }
-            } else if (Array.isArray(editingProduct.image_urls)) {
-              existingImageUrls = editingProduct.image_urls
-            }
-          }
-          allImageUrls = existingImageUrls
-        }
+        // For updates: allImageUrls already has existing + new
+        let finalImageUrls = allImageUrls
+        console.log("[Admin EDIT] imagesModified:", imagesModified, "allImageUrls count:", allImageUrls.length, "newImageUrls count:", newImageUrls.length)
         
-        const imageUrlsToSave = allImageUrls.length > 0 ? JSON.stringify(allImageUrls) : null
-        console.log("[Admin] Image URLs array before stringify:", allImageUrls)
-        console.log("[Admin] Image URLs after JSON.stringify:", imageUrlsToSave)
+        // allImageUrls = [...existingImages, ...newImageUrls]
+        // So if imagesModified = false and newImageUrls is empty, allImageUrls = existingImages (correct!)
+        // If imagesModified = true, allImageUrls has both old and new (correct!)
+        
+        const imageUrlsToSave = finalImageUrls.length > 0 ? JSON.stringify(finalImageUrls) : null
         
         // Validate that imageUrlsToSave is proper JSON
         if (imageUrlsToSave) {
@@ -460,9 +448,10 @@ export default function AdminPage() {
         }
         
         const updateData: any = {
+          id: editingProduct.id,
           name: productForm.name,
           price: Number.parseFloat(productForm.price),
-          image_url: allImageUrls[0] || editingProduct.image_url,
+          image_url: finalImageUrls[0] || editingProduct.image_url,
           image_urls: imageUrlsToSave,
           stock: Number.parseInt(productForm.stock),
           category: categoryStr,
@@ -470,12 +459,33 @@ export default function AdminPage() {
           updated_at: new Date().toISOString(),
         }
         console.log("[Product Update] Final payload:", updateData)
-        const { data: updatedDataArray, error } = await supabase.from("products").update(updateData).eq("id", editingProduct.id).select()
-        if (error) throw error
-        savedProduct = updatedDataArray && updatedDataArray.length > 0 ? updatedDataArray[0] : editingProduct
+        console.log("[Product Update] Updating product ID:", editingProduct.id)
+        
+        // Use API endpoint instead of direct Supabase (avoids RLS issues)
+        const updateResponse = await fetch("/api/products/update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updateData),
+        })
+        
+        const updateResult = await updateResponse.json()
+        console.log("[Product Update] API response:", updateResult)
+        
+        if (!updateResponse.ok) {
+          console.error("[Product Update] API error:", updateResult)
+          throw new Error(updateResult.error || "Failed to update product")
+        }
+        
+        if (updateResult.data && updateResult.data.length > 0) {
+          savedProduct = updateResult.data[0]
+          console.log("[Product Update] Success, updated product:", savedProduct)
+        } else {
+          console.warn("[Product Update] Update succeeded but no data returned")
+          savedProduct = updateData
+        }
       } else {
-        const imageUrlsToSave = newImageUrls.length > 0 ? JSON.stringify(newImageUrls) : null
-        console.log("[Admin] New product - Image URLs array:", newImageUrls)
+        const imageUrlsToSave = allImageUrls.length > 0 ? JSON.stringify(allImageUrls) : null
+        console.log("[Admin] New product - Image URLs array:", allImageUrls)
         console.log("[Admin] New product - After stringify:", imageUrlsToSave)
         
         // Validate that imageUrlsToSave is proper JSON
@@ -491,18 +501,39 @@ export default function AdminPage() {
           }
         }
         
-        const { data, error } = await supabase.from("products").insert({
+        const createData = {
           name: productForm.name,
           price: Number.parseFloat(productForm.price),
-          image_url: newImageUrls[0] || "",
+          image_url: allImageUrls[0] || "",
           image_urls: imageUrlsToSave,
           stock: Number.parseInt(productForm.stock),
           category: categoryStr,
           details: productForm.details,
-        }).select()
-        if (error) throw error
-        if (!data || data.length === 0) throw new Error("Product creation failed")
-        savedProduct = data[0]
+        }
+        
+        console.log("[Admin] Creating new product with data:", createData)
+        
+        // Use API endpoint instead of direct Supabase
+        const createResponse = await fetch("/api/products/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(createData),
+        })
+        
+        const createResult = await createResponse.json()
+        console.log("[Admin] Create API response:", createResult)
+        
+        if (!createResponse.ok) {
+          console.error("[Admin] Create API error:", createResult)
+          throw new Error(createResult.error || "Failed to create product")
+        }
+        
+        if (createResult.data && createResult.data.length > 0) {
+          savedProduct = createResult.data[0]
+          console.log("[Admin] Create success, new product:", savedProduct)
+        } else {
+          throw new Error("Product creation failed - no data returned")
+        }
       }
 
       // Handle promotions (auto or manual)
@@ -539,6 +570,7 @@ export default function AdminPage() {
       setProductForm({ name: "", price: "", image_url: "", stock: "", category: "", categories: [], details: "" })
       setImageFiles([])
       setSelectedImageIndex(0)
+      setImagesModified(false)
       setEditingProduct(null)
       setShowProductForm(false)
       setProductPromoMode("none")
@@ -547,8 +579,12 @@ export default function AdminPage() {
       showAlert("Product saved successfully!", "success", "Success")
       loadAllData()
     } catch (err) {
-      console.error("[Product Save Error]", err)
-      showAlert(err instanceof Error ? err.message : "Error saving product", "error", "Error")
+      console.error("[Product Save Error] Full error:", err)
+      if (err instanceof Error) {
+        console.error("[Product Save Error] Message:", err.message)
+        console.error("[Product Save Error] Stack:", err.stack)
+      }
+      showAlert(err instanceof Error ? err.message : String(err), "error", "Error Saving Product")
     }
   }
 
@@ -560,14 +596,29 @@ export default function AdminPage() {
       confirmText: "Delete",
       cancelText: "Cancel",
       onConfirm: async () => {
-        const supabase = createClient()
         try {
-          const { error } = await supabase.from("products").delete().eq("id", id)
-          if (error) throw error
+          console.log("[Product Delete] Deleting product ID:", id)
+          
+          // Use API endpoint instead of direct Supabase
+          const deleteResponse = await fetch("/api/products/delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id }),
+          })
+          
+          const deleteResult = await deleteResponse.json()
+          console.log("[Product Delete] API response:", deleteResult)
+          
+          if (!deleteResponse.ok) {
+            console.error("[Product Delete] API error:", deleteResult)
+            throw new Error(deleteResult.error || "Failed to delete product")
+          }
+          
           showAlert("Product deleted successfully!", "success", "Success")
           setConfirmModal({ ...confirmModal, isOpen: false })
           loadAllData()
         } catch (err) {
+          console.error("[Product Delete] Error:", err)
           showAlert(err instanceof Error ? err.message : "Error deleting product", "error", "Error")
           setConfirmModal({ ...confirmModal, isOpen: false })
         }
@@ -925,7 +976,7 @@ export default function AdminPage() {
         {tab === "products" && (
           <div>
             <div className="mb-6 flex gap-2 items-center flex-wrap">
-              <button onClick={() => { setEditingProduct(null); setProductForm({ name: "", price: "", image_url: "", stock: "", category: "", categories: [], details: "" }); setImageFiles([]); setSelectedImageIndex(0); setProductAutoPromo({ enabled: false, discount_percent: 0 }); setShowProductForm(!showProductForm) }} className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:opacity-90 h-10"><Plus size={18} /> Add Product</button>
+              <button onClick={() => { setEditingProduct(null); setProductForm({ name: "", price: "", image_url: "", stock: "", category: "", categories: [], details: "" }); setImageFiles([]); setSelectedImageIndex(0); setImagesModified(false); setProductAutoPromo({ enabled: false, discount_percent: 0 }); setShowProductForm(!showProductForm) }} className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:opacity-90 h-10"><Plus size={18} /> Add Product</button>
               
               {/* Search bar */}
               <input 
@@ -1034,6 +1085,7 @@ export default function AdminPage() {
                                   onClick={() => {
                                     const newFiles = imageFiles.filter((_, i) => i !== idx)
                                     setImageFiles(newFiles)
+                                    setImagesModified(true)
                                     if (selectedImageIndex >= newFiles.length) {
                                       setSelectedImageIndex(Math.max(0, newFiles.length - 1))
                                     }
@@ -1062,6 +1114,7 @@ export default function AdminPage() {
                             preview: URL.createObjectURL(f)
                           }))
                           setImageFiles([...imageFiles, ...newImages])
+                          setImagesModified(true)
                         }}
                         className="w-full"
                       />
@@ -1190,7 +1243,7 @@ export default function AdminPage() {
 
                   <div className="flex gap-2">
                     <button onClick={handleSaveProduct} className="px-5 py-2.5 bg-primary text-white rounded-xl font-semibold hover:from-green-700 hover:opacity-90">Save</button>
-                    <button onClick={() => { setShowProductForm(false); setEditingProduct(null); setImageFiles([]); setSelectedImageIndex(0) }} className="px-5 py-2.5 border border-gray-300 text-gray-700 rounded-xl font-semibold hover:bg-gray-100 transition-all">Cancel</button>
+                    <button onClick={() => { setShowProductForm(false); setEditingProduct(null); setImageFiles([]); setSelectedImageIndex(0); setImagesModified(false) }} className="px-5 py-2.5 border border-gray-300 text-gray-700 rounded-xl font-semibold hover:bg-gray-100 transition-all">Cancel</button>
                   </div>
                 </div>
               </div>
@@ -1224,6 +1277,7 @@ export default function AdminPage() {
                     <div className="flex gap-2">
                       <button onClick={() => { 
                         setEditingProduct(product)
+                        setImagesModified(false)
                         // Parse categories from comma-separated string
                         const parsedCategories = product.category 
                           ? product.category.split(",").map((cat: string) => cat.trim()).filter((cat: string) => cat.length > 0)
@@ -1671,15 +1725,7 @@ export default function AdminPage() {
           <div>
             <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
               <h2 className="text-2xl font-semibold">Promotions</h2>
-              <input 
-                type="text" 
-                placeholder="Search promotions..." 
-                value={promoSearch}
-                onChange={(e) => setPromoSearch(e.target.value)}
-                className="flex-1 min-w-48 px-4 py-2 border border-border rounded-lg"
-              />
-              <button onClick={() => { setSelectedPromotion(null); setPromoForm({ name: "", mode: "manual", start_at: "", end_at: "", is_active: true }); setPromoSlidesFiles([]); setPromoSlidesPreview([]); setSelectedPromoSlideIndex(0); setPromoSelectedProducts({}) }} className="px-4 py-2 bg-primary text-primary-foreground rounded">New Promotion</button>
-            </div>
+              </div>
 
             {/* SEPARATED: Promotion Slides Management */}
             <div className="border border-border rounded-lg p-6 mb-6">
@@ -1850,6 +1896,13 @@ export default function AdminPage() {
             {/* Promotions List */}
             <div className="grid gap-4">
               <h3 className="text-lg font-semibold">Active Promotions</h3>
+              <input 
+                type="text" 
+                placeholder="Search promotions..." 
+                value={promoSearch}
+                onChange={(e) => setPromoSearch(e.target.value)}
+                className="flex-1 min-w-48 px-4 py-2 border border-border rounded-lg"
+              />
               {promotions
                 .filter(pr => !promoSearch || pr.name.toLowerCase().includes(promoSearch.toLowerCase()))
                 .length === 0 ? 
