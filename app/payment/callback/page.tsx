@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client"
 import { verifyVNPayResponse } from "@/lib/vnpay"
+import { notifyPaymentSuccess } from "@/app/payment/actions"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
@@ -62,6 +63,9 @@ export default function PaymentCallbackPage() {
             response_data: params,
           })
 
+          // Send notifications to admin and user
+          await notifyPaymentSuccess(id)
+
           setStatus("success")
           setMessage("Payment successful! Your order has been confirmed.")
         } else {
@@ -79,13 +83,6 @@ export default function PaymentCallbackPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <nav className="border-b border-border sticky top-0 z-50 bg-background/95 backdrop-blur">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
-          <Link href="/" className="text-2xl font-bold tracking-tight text-foreground">
-            Premium Store
-          </Link>
-        </div>
-      </nav>
 
       <div className="max-w-2xl mx-auto px-4 py-12">
         <Card>

@@ -1,48 +1,56 @@
-import { createClient } from "@/lib/supabase/server"
+import { createClient, createAdminClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
+import { notifyAdminsOfContactSubmission } from "@/lib/notifications"
 
 export async function POST(req: NextRequest) {
   try {
-    const { name, email, message } = await req.json()
+    const { name, email, message, phone } = await req.json()
 
     if (!name || !email || !message) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
     }
 
-    const supabase = await createClient()
+    const adminClient = await createAdminClient()
 
-    // Store contact message (optional - if you have a contacts table)
-    // await supabase.from("contacts").insert({ name, email, message, created_at: new Date().toISOString() })
-
-    // Create notification for all admins
+    // Store contact message in database
     try {
-      const { data: adminUsers } = await supabase
-        .from("admin_access")
-        .select("user_id")
-        .eq("is_admin", true)
-        .limit(10)
+      const { error: dbError } = await adminClient
+        .from("contact_messages")
+        .insert({
+          name,
+          email,
+          phone: phone || null,
+          message,
+          created_at: new Date().toISOString(),
+        })
 
-      if (adminUsers && adminUsers.length > 0) {
-        const adminNotifications = adminUsers.map((admin) => ({
-          user_id: admin.user_id,
-          type: "contact_form",
-          title: "New Contact Form Submission",
-          message: `New message from ${name} (${email}): "${message.substring(0, 50)}..."`,
-          link: `/admin`, // Or create a dedicated admin contact page
-          read: false,
-        }))
-
-        const { error: notifError } = await supabase.from("notifications").insert(adminNotifications)
-        if (notifError) console.error("Failed to create admin notification:", notifError)
+      if (dbError) {
+        console.error("[Contact API] DB Error:", dbError)
+        return NextResponse.json({ error: "Failed to save message" }, { status: 500 })
       }
-    } catch (notifError) {
-      console.error("Error notifying admins:", notifError)
-      // Don't fail the request if notification fails
+
+      console.log("[Contact API] Message stored in database")
+    } catch (dbError) {
+      console.error("[Contact API] Error storing message:", dbError)
+      return NextResponse.json({ error: "Failed to save message" }, { status: 500 })
     }
 
-    return NextResponse.json({ success: true, message: "Message sent successfully" })
+    // Notify admins using notification helper
+    try {
+      await notifyAdminsOfContactSubmission(name, email, message)
+    } catch (notifError) {
+      console.error("[Contact API] Error notifying admins:", notifError)
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: "Message sent successfully! We'll get back to you soon.",
+    })
   } catch (error) {
-    console.error("Contact form error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    console.error("[Contact API] Error:", error)
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Internal server error" },
+      { status: 500 }
+    )
   }
 }

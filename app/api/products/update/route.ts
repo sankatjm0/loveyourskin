@@ -1,5 +1,6 @@
 // app/api/products/update/route.ts
 import { createClient, createAdminClient } from "@/lib/supabase/server"
+import { notifyAdminsOfProductEdit } from "@/lib/notifications"
 import { NextRequest, NextResponse } from "next/server"
 
 export async function POST(request: NextRequest) {
@@ -39,6 +40,15 @@ export async function POST(request: NextRequest) {
     
     console.log("[API Products Update] Success, returned:", data?.length, "rows")
     console.log("[API Products Update] Data:", data)
+    
+    // Notify admins of product update
+    try {
+      const productName = updateData.name || "Product"
+      await notifyAdminsOfProductEdit(productName, updateData)
+    } catch (notifError) {
+      console.error("[API Products Update] Notification error:", notifError)
+      // Don't fail the request if notification fails
+    }
     
     return NextResponse.json({ success: true, data })
   } catch (error) {

@@ -90,6 +90,7 @@ export async function createOrder(data: {
   try {
     await supabase.from("notifications").insert({
       user_id: user.id,
+      admin_id: null,
       type: "new_order",
       title: "Order Placed",
       message: `Your order #${orderNumber} has been placed successfully. Total: ${data.total_amount}VND`,
@@ -100,29 +101,7 @@ export async function createOrder(data: {
     console.error("Failed to create notification for user:", notifError)
   }
 
-  // Create notification for admin
-  try {
-    const { data: adminUsers } = await supabase
-      .from("admin_access")
-      .select("user_id")
-      .eq("is_admin", true)
-      .limit(10)
-
-    if (adminUsers && adminUsers.length > 0) {
-      const adminNotifications = adminUsers.map((admin) => ({
-        user_id: admin.user_id,
-        type: "new_order",
-        title: "New Order Received",
-        message: `A new order #${orderNumber} has been received. Total: ${data.total_amount}VND`,
-        link: `/admin/order/${(order as any).id}`,
-        read: false,
-      }))
-
-      await supabase.from("notifications").insert(adminNotifications)
-    }
-  } catch (notifError) {
-    console.error("Failed to create notification for admin:", notifError)
-  }
+  // Admin notifications are handled by database trigger (notify_admins_of_new_order)
 
   return order as Order
 }

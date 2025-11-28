@@ -57,13 +57,6 @@ export default async function ProductPage({ params }: { params: { id: string } }
 
     return (
       <div className="min-h-screen bg-background">
-        {/* Header */}
-        <header className="border-b border-border sticky top-0 z-50 bg-background/95 backdrop-blur">
-          <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
-            <Link href="/" className="text-2xl font-bold tracking-tight">Premium Store</Link>
-            <Link href="/cart" className="px-4 py-2 hover:bg-muted rounded-lg transition">Cart</Link>
-          </div>
-        </header>
 
         <div className="max-w-7xl mx-auto px-4 py-12">
           <Link href="/products" className="text-sm hover:text-primary transition flex items-center gap-2 mb-8"><ChevronLeft size={16} /> Back to Products</Link>

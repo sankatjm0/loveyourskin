@@ -1,5 +1,6 @@
 // app/api/products/create/route.ts
 import { createClient, createAdminClient } from "@/lib/supabase/server"
+import { notifyAdminsOfProductEdit } from "@/lib/notifications"
 import { NextRequest, NextResponse } from "next/server"
 
 export async function POST(request: NextRequest) {
@@ -33,6 +34,14 @@ export async function POST(request: NextRequest) {
     
     console.log("[API Products Create] Success, returned:", data?.length, "rows")
     console.log("[API Products Create] Data:", data)
+    
+    // Notify admins of new product
+    try {
+      const productName = body.name || "New Product"
+      await notifyAdminsOfProductEdit(productName, body)
+    } catch (notifError) {
+      console.error("[API Products Create] Notification error:", notifError)
+    }
     
     return NextResponse.json({ success: true, data })
   } catch (error) {

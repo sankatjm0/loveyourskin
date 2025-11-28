@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
+import { notifyNewUserSignup } from "@/app/auth/actions"
 
 export default function SignUpPage() {
   const [email, setEmail] = useState("")
@@ -37,6 +38,10 @@ export default function SignUpPage() {
         password,
       })
       if (error) throw error
+      
+      // Notify admins of new user registration via server action
+      await notifyNewUserSignup(email)
+      
       router.push("/")
       router.refresh()
     } catch (error: unknown) {

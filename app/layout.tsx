@@ -2,15 +2,20 @@ import type React from "react"
 import type { Metadata } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
+import { LayoutWrapper } from "@/components/layout-wrapper"
 import "./globals.css"
 
 const _geist = Geist({ subsets: ["latin"] })
 const _geistMono = Geist_Mono({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "Premium Store - Modern E-commerce",
-  description: "Shop curated products with exceptional design and quality",
+  title: "LoveYourSkin - Premium Skincare Products",
+  description: "Premium skincare products for everyone. Care for your skin, love yourself.",
   generator: "v0.app",
+  icons: {
+    icon: "/favicon.ico",
+    shortcut: "/favicon.ico"
+  }
 }
 
 export default function RootLayout({
@@ -21,7 +26,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="font-sans antialiased">
-        {children}
+        <LayoutWrapper>{children}</LayoutWrapper>
         <Analytics />
       </body>
     </html>

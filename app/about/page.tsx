@@ -1,23 +1,6 @@
-import Link from "next/link"
-
 export default function AboutPage() {
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b border-border sticky top-0 z-50 bg-background/95 backdrop-blur">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
-          <Link href="/" className="text-2xl font-bold">
-            Premium Store
-          </Link>
-          <div className="flex items-center gap-4">
-            <Link href="/products" className="text-sm hover:text-primary transition">
-              Products
-            </Link>
-            <Link href="/auth/login" className="text-sm hover:text-primary transition">
-              Login
-            </Link>
-          </div>
-        </div>
-      </header>
+    <div className="bg-background">
       <main className="max-w-4xl mx-auto px-4 py-16">
         <h1 className="text-4xl font-bold mb-8">About Us</h1>
         <div className="space-y-6 text-muted-foreground leading-relaxed">

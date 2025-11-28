@@ -16,13 +16,6 @@ export default async function PaymentPage({ params }: { params: Promise<{ id: st
 
   return (
     <div className="min-h-screen bg-background">
-      <nav className="border-b border-border sticky top-0 z-50 bg-background/95 backdrop-blur">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
-          <Link href="/" className="text-2xl font-bold tracking-tight text-foreground">
-            Premium Store
-          </Link>
-        </div>
-      </nav>
 
       <div className="max-w-2xl mx-auto px-4 py-12">
         <h1 className="text-4xl font-bold mb-12">Payment</h1>

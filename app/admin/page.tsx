@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
 import { Modal } from "@/components/Modal"
 import { Notifications } from "@/components/notifications"
+import ExportStatsButton from "@/components/export-stats-button"
 import { getActiveSlides, uploadSlideImage } from "@/lib/promotions"
 
 // Charts
@@ -304,8 +305,11 @@ export default function AdminPage() {
   async function loadAllData() {
     setIsLoading(true)
     const supabase = createClient()
+    
+    // Get current user for filtering notifications
+    const { data: { user } } = await supabase.auth.getUser()
 
-    const [productsRes, usersRes, ordersRes, promotionsRes, slidesRes, historyRes, promoProductsRes] = await Promise.all([
+    const [productsRes, usersRes, ordersRes, promotionsRes, slidesRes, historyRes, promoProductsRes, notificationsRes] = await Promise.all([
       supabase.from("products").select("*"),
       supabase.from("profiles").select("id, email, created_at"),
       supabase.from("orders").select("*, profiles(email)").order("created_at", { ascending: false }),
@@ -313,6 +317,8 @@ export default function AdminPage() {
       supabase.from("promotion_slides").select("*").order("display_order"),
       supabase.from("history").select("*").order("created_at", { ascending: false }).limit(50),
       supabase.from("promotion_products").select("*"),
+      // Fetch notifications where user is admin_id or user_id
+      user ? supabase.from("notifications").select("*").or(`admin_id.eq.${user.id},user_id.eq.${user.id}`).order("created_at", { ascending: false }).limit(100) : Promise.resolve({ data: [] }),
     ])
 
     setProducts(productsRes.data || [])
@@ -320,7 +326,14 @@ export default function AdminPage() {
     setOrders(ordersRes.data || [])
     setPromotions(promotionsRes.data || [])
     setPromoSlides(slidesRes.data || [])
-    setHistoryRecords(historyRes.data || [])
+    
+    // Combine history records and notifications for a unified activity log
+    const combinedHistory = [
+      ...(historyRes.data || []).map((h: any) => ({ ...h, source: 'history' })),
+      ...(notificationsRes.data || []).map((n: any) => ({ ...n, source: 'notification', created_at: n.created_at })),
+    ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    
+    setHistoryRecords(combinedHistory)
 
     // Calculate stats
     const completedOrders = (ordersRes.data || []).filter((o: any) => o.status === "delivered")
@@ -903,30 +916,34 @@ export default function AdminPage() {
             <button key={t} onClick={() => setTab(t as any)} className={`px-4 py-2 font-medium capitalize border-b-2 transition ${tab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{t}</button>
           ))}
         </div>
-
         {/* Dashboard Tab */}
         {tab === "dashboard" && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-            <div className="border border-border rounded-lg p-6">
-              <p className="text-sm text-muted-foreground">Total Orders</p>
-              <p className="text-3xl font-bold">{stats.totalOrders}</p>
-              <p className="text-sm text-muted-foreground mt-2">Pending: {stats.pendingOrders}</p>
+          <div>
+            <div className="mb-6 flex justify-between items-center">
+              <h2 className="text-2xl font-bold">Dashboard</h2>
+              <ExportStatsButton />
             </div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+              <div className="border border-border rounded-lg p-6">
+                <p className="text-sm text-muted-foreground">Total Orders</p>
+                <p className="text-3xl font-bold">{stats.totalOrders}</p>
+                <p className="text-sm text-muted-foreground mt-2">Pending: {stats.pendingOrders}</p>
+              </div>
 
-            <div className="border border-border rounded-lg p-6">
-              <p className="text-sm text-muted-foreground">Total Revenue (delivered)</p>
-              <p className="text-3xl font-bold text-green-600">{stats.totalRevenue.toFixed(2)}VND</p>
-              <p className="text-sm text-muted-foreground mt-2">Last 7 days shown below</p>
-            </div>
+              <div className="border border-border rounded-lg p-6">
+                <p className="text-sm text-muted-foreground">Total Revenue (delivered)</p>
+                <p className="text-3xl font-bold text-green-600">{stats.totalRevenue.toFixed(2)}VND</p>
+                <p className="text-sm text-muted-foreground mt-2">Last 7 days shown below</p>
+              </div>
 
-            <div className="border border-border rounded-lg p-6">
-              <p className="text-sm text-muted-foreground">Active Products</p>
-              <p className="text-3xl font-bold">{products.length}</p>
-              <p className="text-sm text-muted-foreground mt-2">Top product: {topProducts[0]?.product?.name || "-"}</p>
-            </div>
+              <div className="border border-border rounded-lg p-6">
+                <p className="text-sm text-muted-foreground">Active Products</p>
+                <p className="text-3xl font-bold">{products.length}</p>
+                <p className="text-sm text-muted-foreground mt-2">Top product: {topProducts[0]?.product?.name || "-"}</p>
+              </div>
 
-            {/* Charts */}
-            <div className="col-span-1 lg:col-span-2 grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
+              {/* Charts */}
+              <div className="col-span-1 lg:col-span-2 grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
               <div className="border border-border rounded-lg p-4 h-80">
                 <h4 className="font-semibold mb-2">Order Status Distribution</h4>
                 <ResponsiveContainer width="100%" height="100%">
@@ -968,6 +985,7 @@ export default function AdminPage() {
                   )}
                 </div>
               </div>
+            </div>
             </div>
           </div>
         )}
@@ -2002,11 +2020,11 @@ export default function AdminPage() {
         {/* History Tab */}
         {tab === "history" && (
           <div>
-            <h2 className="text-2xl font-semibold mb-6">Action History</h2>
+            <h2 className="text-2xl font-semibold mb-6">Activity History & Notifications</h2>
             
             {historyRecords.length === 0 ? (
               <div className="text-center py-12 border border-border rounded-lg bg-muted/30">
-                <p className="text-muted-foreground">No history records yet</p>
+                <p className="text-muted-foreground">No activity records yet</p>
               </div>
             ) : (
               <div className="space-y-3">
@@ -2014,32 +2032,63 @@ export default function AdminPage() {
                   let icon = "📝"
                   let typeLabel = ""
                   let description = ""
+                  let bgColor = "bg-blue-50"
+                  let borderColor = "border-blue-200"
 
-                  if (record.type === "product_stock_change") {
+                  // Handle notification records
+                  if (record.source === 'notification') {
+                    if (record.type === 'contact_form') {
+                      icon = "💬"
+                      typeLabel = "New Contact Message"
+                      bgColor = "bg-purple-50"
+                      borderColor = "border-purple-200"
+                      description = record.message || "New contact form submission"
+                    } else if (record.type === 'user_registered') {
+                      icon = "👤"
+                      typeLabel = "New User Registration"
+                      bgColor = "bg-green-50"
+                      borderColor = "border-green-200"
+                      description = record.message || "New user registered"
+                    } else if (record.type === 'product_edit') {
+                      icon = "✏️"
+                      typeLabel = "Product Edited"
+                      bgColor = "bg-orange-50"
+                      borderColor = "border-orange-200"
+                      description = record.message || "Product has been modified"
+                    } else if (record.type === 'user_profile_edit') {
+                      icon = "🔧"
+                      typeLabel = "User Profile Updated"
+                      bgColor = "bg-indigo-50"
+                      borderColor = "border-indigo-200"
+                      description = record.message || "User profile has been updated"
+                    }
+                  } else if (record.type === "product_stock_change") {
                     icon = "📦"
                     typeLabel = "Stock Update"
-                    const product = products.find(p => p.id === record.product_id)
-                    description = `${product?.name || "Product"}: Stock changed from ${record.old_value} → ${record.new_value}`
+                    description = `${products.find(p => p.id === record.product_id)?.name || "Product"}: Stock changed from ${record.old_value} → ${record.new_value}`
                   } else if (record.type === "product_created") {
                     icon = "✨"
                     typeLabel = "New Product"
-                    const product = products.find(p => p.id === record.product_id)
-                    description = `Added: ${product?.name || "New Product"}`
+                    bgColor = "bg-green-50"
+                    borderColor = "border-green-200"
+                    description = `Added: ${products.find(p => p.id === record.product_id)?.name || "New Product"}`
                   } else if (record.type === "order_completed") {
                     icon = "✅"
                     typeLabel = "Order Completed"
+                    bgColor = "bg-green-50"
+                    borderColor = "border-green-200"
                     description = record.description || "Order marked as completed"
                   }
 
                   return (
-                    <div key={record.id} className="border border-border rounded-lg p-4 hover:bg-muted/50 transition">
+                    <div key={record.id} className={`border rounded-lg p-4 hover:opacity-75 transition ${borderColor} ${bgColor}`}>
                       <div className="flex gap-4">
                         <span className="text-2xl">{icon}</span>
                         <div className="flex-1">
-                          <h3 className="font-semibold text-sm">{typeLabel}</h3>
-                          <p className="text-sm text-muted-foreground">{description}</p>
-                          <p className="text-xs text-muted-foreground mt-2">
-                            {new Date(record.created_at).toLocaleString()}
+                          <h3 className="font-semibold text-sm text-gray-800">{typeLabel}</h3>
+                          <p className="text-sm text-gray-700 mt-1">{description}</p>
+                          <p className="text-xs text-gray-500 mt-2">
+                            {new Date(record.created_at).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}
                           </p>
                         </div>
                       </div>
