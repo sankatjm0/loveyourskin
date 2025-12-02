@@ -25,6 +25,7 @@ import {
   CartesianGrid,
   Legend,
 } from "recharts"
+import { skip } from "node:test"
 
 interface Product {
   id: string
@@ -315,7 +316,7 @@ export default function AdminPage() {
       supabase.from("orders").select("*, profiles(email)").order("created_at", { ascending: false }),
       supabase.from("promotions").select("*").order("created_at", { ascending: false }),
       supabase.from("promotion_slides").select("*").order("display_order"),
-      supabase.from("history").select("*").order("created_at", { ascending: false }).limit(50),
+      supabase.from("history").select("*").order("created_at", { ascending: false }),
       supabase.from("promotion_products").select("*"),
       // Fetch notifications where user is admin_id or user_id
       user ? supabase.from("notifications").select("*").or(`admin_id.eq.${user.id},user_id.eq.${user.id}`).order("created_at", { ascending: false }).limit(100) : Promise.resolve({ data: [] }),
@@ -921,7 +922,6 @@ export default function AdminPage() {
           <div>
             <div className="mb-6 flex justify-between items-center">
               <h2 className="text-2xl font-bold">Dashboard</h2>
-              <ExportStatsButton />
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
               <div className="border border-border rounded-lg p-6">
@@ -1997,9 +1997,10 @@ export default function AdminPage() {
                       const discountedPrice = prod ? prod.price * (1 - pp.discount_percent / 100) : 0
                       return (
                         <div key={pp.product_id} className="border p-3 rounded flex justify-between items-center">
-                          <div>
-                            <p className="font-medium">{prod?.name}</p>
-                            <p className="text-sm text-muted-foreground">Original: {prod?.price}VND</p>
+                          <div className="flex items-center gap-4">
+                            <img src={prod?.image_url || "/placeholder.svg"} className="w-16 h-16 object-cover rounded" />
+                            <div><p className="font-medium">{prod?.name}</p>
+                            <p className="text-sm text-muted-foreground">Original: {prod?.price}VND</p></div>
                           </div>
                           <div className="text-right">
                             <p className="text-green-600 font-bold">{discountedPrice.toFixed(0)}VND</p>
@@ -2028,57 +2029,73 @@ export default function AdminPage() {
               </div>
             ) : (
               <div className="space-y-3">
-                {historyRecords.map((record) => {
-                  let icon = "📝"
-                  let typeLabel = ""
-                  let description = ""
-                  let bgColor = "bg-blue-50"
-                  let borderColor = "border-blue-200"
+                {historyRecords
+                  .filter((record) => {
+                    if (record.source === "notification") {
+                      return [
+                        "contact_form",
+                        "user_registered",
+                        "product_edit",
+                        "new_order",
+                      ].includes(record.type)
+                    }
 
-                  // Handle notification records
-                  if (record.source === 'notification') {
-                    if (record.type === 'contact_form') {
-                      icon = "💬"
-                      typeLabel = "New Contact Message"
-                      bgColor = "bg-purple-50"
-                      borderColor = "border-purple-200"
-                      description = record.message || "New contact form submission"
-                    } else if (record.type === 'user_registered') {
-                      icon = "👤"
-                      typeLabel = "New User Registration"
+                    return [
+                      "product_stock_change",
+                      "product_created",
+                      "order_completed",
+                    ].includes(record.type)
+                  })
+                  .map((record) => {
+                    let icon = ""
+                    let typeLabel = ""
+                    let description = ""
+                    let bgColor = ""
+                    let borderColor = ""
+
+                    if (record.source === "notification") {
+                      if (record.type === "contact_form") {
+                        icon = "💬"
+                        typeLabel = "New Contact Message"
+                        bgColor = "bg-purple-50"
+                        borderColor = "border-purple-200"
+                        description = record.message || "New contact form submission"
+                      } else if (record.type === "user_registered") {
+                        icon = "👤"
+                        typeLabel = "New User Registration"
+                        bgColor = "bg-green-50"
+                        borderColor = "border-green-200"
+                        description = record.message || "New user registered"
+                      } else if (record.type === "product_edit") {
+                        icon = "✏️"
+                        typeLabel = "Product Edited"
+                        bgColor = "bg-orange-50"
+                        borderColor = "border-orange-200"
+                        description = record.message || "Product has been modified"
+                      } else if (record.type === "new_order") {
+                        icon = "📦"
+                        typeLabel = "New Order"
+                        bgColor = "bg-pink-50"
+                        borderColor = "border-pink-200"
+                        description = record.message || "New order created"
+                      }
+                    } else if (record.type === "product_stock_change") {
+                      icon = "📦"
+                      typeLabel = "Stock Update"
+                      description = `${products.find(p => p.id === record.product_id)?.name || "Product"}: Stock changed from ${record.old_value} → ${record.new_value}`
+                    } else if (record.type === "product_created") {
+                      icon = "✨"
+                      typeLabel = "New Product"
                       bgColor = "bg-green-50"
                       borderColor = "border-green-200"
-                      description = record.message || "New user registered"
-                    } else if (record.type === 'product_edit') {
-                      icon = "✏️"
-                      typeLabel = "Product Edited"
-                      bgColor = "bg-orange-50"
-                      borderColor = "border-orange-200"
-                      description = record.message || "Product has been modified"
-                    } else if (record.type === 'user_profile_edit') {
-                      icon = "🔧"
-                      typeLabel = "User Profile Updated"
-                      bgColor = "bg-indigo-50"
-                      borderColor = "border-indigo-200"
-                      description = record.message || "User profile has been updated"
+                      description = `Added: ${products.find(p => p.id === record.product_id)?.name || "New Product"}`
+                    } else if (record.type === "order_completed") {
+                      icon = "✅"
+                      typeLabel = "Order Completed"
+                      bgColor = "bg-green-50"
+                      borderColor = "border-green-200"
+                      description = record.description || "Order marked as completed"
                     }
-                  } else if (record.type === "product_stock_change") {
-                    icon = "📦"
-                    typeLabel = "Stock Update"
-                    description = `${products.find(p => p.id === record.product_id)?.name || "Product"}: Stock changed from ${record.old_value} → ${record.new_value}`
-                  } else if (record.type === "product_created") {
-                    icon = "✨"
-                    typeLabel = "New Product"
-                    bgColor = "bg-green-50"
-                    borderColor = "border-green-200"
-                    description = `Added: ${products.find(p => p.id === record.product_id)?.name || "New Product"}`
-                  } else if (record.type === "order_completed") {
-                    icon = "✅"
-                    typeLabel = "Order Completed"
-                    bgColor = "bg-green-50"
-                    borderColor = "border-green-200"
-                    description = record.description || "Order marked as completed"
-                  }
 
                   return (
                     <div key={record.id} className={`border rounded-lg p-4 hover:opacity-75 transition ${borderColor} ${bgColor}`}>

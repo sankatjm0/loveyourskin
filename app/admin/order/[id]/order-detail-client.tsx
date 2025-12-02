@@ -80,7 +80,7 @@ export default function OrderDetailClient({
             </CardHeader>
             <CardContent className="space-y-6">
               <div>
-                <h3 className="font-semibold mb-4">Order Status Tracking</h3>
+                <h3 className="font-semibold mb-4">Order Status Tracking <span className="text-muted-foreground">(Last updated: {new Date(order.updated_at).toLocaleString()})</span></h3>
                 <div className="flex gap-4 flex-wrap">
                   {statusSteps.map((item, idx) => (
                     <div key={item.step} className="flex items-center gap-2">
@@ -133,7 +133,7 @@ export default function OrderDetailClient({
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Order Date:</span>
-                      <span>{new Date(order.created_at).toLocaleDateString()}</span>
+                      <span>{new Date(order.created_at).toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Total Amount:</span>

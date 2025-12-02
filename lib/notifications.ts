@@ -56,13 +56,12 @@ export async function notifyAdminsOfProductEdit(productName: string, changes: Re
     console.log("[Notifications] Product Edit - Found admins:", admins?.length, "Error:", adminsError)
 
     if (admins && admins.length > 0) {
-      const changedFields = getChangedFields(changes)
       const notifications = admins.map(admin => ({
         user_id: null,
         admin_id: admin.user_id,
         type: "product_edit" as const,
         title: `Product Edited: ${productName}`,
-        message: `Product "${productName}" has been edited. Changes: ${changedFields}`,
+        message: `Product "${productName}" has been edited.`,
         link: "/admin?tab=history",
         read: false,
         created_at: new Date().toISOString(),

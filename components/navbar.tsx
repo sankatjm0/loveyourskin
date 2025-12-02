@@ -113,15 +113,6 @@ export default function Navbar() {
                       <User className="w-5 h-5" />
                     </Link>
 
-                    {/* Orders Icon */}
-                    <Link
-                      href="/orders"
-                      className="p-2 hover:bg-muted rounded-lg transition-colors"
-                      title="Orders"
-                    >
-                      <Package className="w-5 h-5" />
-                    </Link>
-
                     {/* Logout Icon */}
                     <button
                       onClick={handleLogout}

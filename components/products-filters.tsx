@@ -16,7 +16,7 @@ export function ProductsFilters({ products, categories: initialCategories }: Pro
   const [selectedCategory, setSelectedCategory] = useState("All")
   const [categories, setCategories] = useState<any[]>(initialCategories || [])
   const [productDiscounts, setProductDiscounts] = useState<Record<string, { discount_percent: number; promotion_name: string }>>({})
-  const [priceRange, setPriceRange] = useState({ min: 0, max: 1000000000 })
+  const [priceRange, setPriceRange] = useState({ min: 0, max: 10000000 })
   const [alertModal, setAlertModal] = useState({ isOpen: false, title: "Alert", message: "", type: "info" as "info" | "success" | "error" | "warning" })
   const showAlert = (message: string, type: "info" | "success" | "error" | "warning" = "info", title: string = "Alert") => {
     setAlertModal({ isOpen: true, title, message, type })
@@ -78,7 +78,7 @@ export function ProductsFilters({ products, categories: initialCategories }: Pro
         return matchesSearch && productDiscounts[product.id]
       }
       
-      const matchesCategory = selectedCategory === "All" || product.category === selectedCategory
+      const matchesCategory = selectedCategory === "All" || product.category?.includes(selectedCategory)
       return matchesSearch && matchesCategory
     })
   }, [searchTerm, selectedCategory, products, productDiscounts, priceRange])
@@ -98,8 +98,9 @@ export function ProductsFilters({ products, categories: initialCategories }: Pro
       </div>
 
       {/* Category Filter */}
-      <div className="flex gap-2 mb-8 overflow-x-auto pb-2">
-        {categoryList.map((category) => (
+      <div className="flex gap-2 mb-8 overflow-x-auto">
+        <div className="flex gap-2 overflow-x-auto items-center">
+          {categoryList.map((category) => (
           <button
             key={category}
             onClick={() => setSelectedCategory(category)}
@@ -112,8 +113,7 @@ export function ProductsFilters({ products, categories: initialCategories }: Pro
             {category}
           </button>
         ))}
-
-          <div className="flex gap-2 overflow-x-auto items-center">
+        </div>
             <label className="text-sm font-medium">Price Range</label>
             <input 
               type="number" 
@@ -128,12 +128,11 @@ export function ProductsFilters({ products, categories: initialCategories }: Pro
               placeholder="Max" 
               value={priceRange.max}
               onChange={(e) => setPriceRange({...priceRange, max: Number(e.target.value)})}
-              className="w-24 px-3 py-2 border border-border rounded text-sm"
+              className="w-24 px-3 border border-border rounded text-sm"
             />
-          </div>
         <button
           onClick={() => setPriceRange({ min: 0, max: 1000000000 })}
-          className="px-3 py-2 text-sm border border-border rounded hover:bg-muted transition"
+          className="px-3 text-sm border border-border rounded hover:bg-muted transition"
         >
           Reset Price
         </button>
