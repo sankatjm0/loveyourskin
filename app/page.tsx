@@ -151,17 +151,6 @@ export default function Home() {
           </div>
         )}
       </section>
-
-      {/* CTA Section */}
-      <section className="bg-primary text-primary-foreground py-16 mt-24">
-        <div className="max-w-4xl mx-auto text-center px-4">
-          <h2 className="text-3xl md:text-4xl font-bold mb-4">Join Our Community</h2>
-          <p className="text-lg mb-8 opacity-90">Get early access to new collections and exclusive offers</p>
-          <button className="px-8 py-3 bg-primary-foreground text-primary rounded-lg font-medium hover:opacity-90 transition">
-            Subscribe Now
-          </button>
-        </div>
-      </section>
     </div>
   )
 }

@@ -13,20 +13,17 @@ export default function Footer() {
           {/* Brand */}
           <div className="space-y-4">
             <h3 className="text-lg font-bold bg-gradient-to-r from-pink-600 to-pink-400 bg-clip-text text-transparent">
-              LoveYourSkin
+              LoveYourScent
             </h3>
             <p className="text-sm text-muted-foreground">
-              Premium skincare products for everyone. Care for your skin, love yourself.
+              Premium perfume for everyone. Care for your smell, love yourself.
             </p>
             <div className="flex gap-4">
-              <a href="#" className="text-muted-foreground hover:text-primary transition">
+              <a href="https://facebook.com/kdiemmm" className="text-muted-foreground hover:text-primary transition">
                 Facebook
               </a>
-              <a href="#" className="text-muted-foreground hover:text-primary transition">
+              <a href="https://instagram.com/sankatjm0" className="text-muted-foreground hover:text-primary transition">
                 Instagram
-              </a>
-              <a href="#" className="text-muted-foreground hover:text-primary transition">
-                Twitter
               </a>
             </div>
           </div>
@@ -42,17 +39,7 @@ export default function Footer() {
               </li>
               <li>
                 <Link href="/products" className="hover:text-primary transition">
-                  New Arrivals
-                </Link>
-              </li>
-              <li>
-                <Link href="/products" className="hover:text-primary transition">
                   Best Sellers
-                </Link>
-              </li>
-              <li>
-                <Link href="/" className="hover:text-primary transition">
-                  Special Offers
                 </Link>
               </li>
             </ul>
@@ -72,16 +59,6 @@ export default function Footer() {
                   Contact Us
                 </Link>
               </li>
-              <li>
-                <a href="#" className="hover:text-primary transition">
-                  Blog
-                </a>
-              </li>
-              <li>
-                <a href="#" className="hover:text-primary transition">
-                  Careers
-                </a>
-              </li>
             </ul>
           </div>
 
@@ -90,22 +67,22 @@ export default function Footer() {
             <h4 className="font-semibold text-sm">Support</h4>
             <ul className="space-y-2 text-sm text-muted-foreground">
               <li>
-                <a href="#" className="hover:text-primary transition">
+                <a href="/faq" className="hover:text-primary transition">
                   FAQ
                 </a>
               </li>
               <li>
-                <a href="#" className="hover:text-primary transition">
+                <a href="/shipping-info" className="hover:text-primary transition">
                   Shipping Info
                 </a>
               </li>
               <li>
-                <a href="#" className="hover:text-primary transition">
+                <a href="/returns" className="hover:text-primary transition">
                   Returns
                 </a>
               </li>
               <li>
-                <a href="#" className="hover:text-primary transition">
+                <a href="/privacy-policy" className="hover:text-primary transition">
                   Privacy Policy
                 </a>
               </li>
