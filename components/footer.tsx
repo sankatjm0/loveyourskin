@@ -96,17 +96,6 @@ export default function Footer() {
         {/* Bottom Footer */}
         <div className="flex flex-col md:flex-row justify-between items-center text-sm text-muted-foreground">
           <p>&copy; {currentYear} LoveYourSkin. All rights reserved.</p>
-          <div className="flex gap-6 mt-4 md:mt-0">
-            <a href="#" className="hover:text-primary transition">
-              Terms of Service
-            </a>
-            <a href="#" className="hover:text-primary transition">
-              Privacy Policy
-            </a>
-            <a href="#" className="hover:text-primary transition">
-              Cookie Policy
-            </a>
-          </div>
         </div>
       </div>
     </footer>
