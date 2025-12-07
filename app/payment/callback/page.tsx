@@ -34,7 +34,7 @@ export default function PaymentCallbackPage() {
         const txnRef = params.vnp_TxnRef
 
         // Extract order ID from txnRef
-        const [id] = txnRef.split("-")
+        const id = txnRef
         setOrderId(id)
 
         if (responseCode === "00") {
@@ -75,6 +75,7 @@ export default function PaymentCallbackPage() {
       } catch (error) {
         setStatus("failure")
         setMessage("An error occurred while processing payment")
+        console.error("PAYMENT CALLBACK ERROR:", error)
       }
     }
 

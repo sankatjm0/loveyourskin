@@ -66,7 +66,7 @@ export function createVNPayUrl(params: Record<string, string | number>) {
     vnp_TmnCode: config.vnp_TmnCode,
     vnp_Locale: "vn",
     vnp_CurrCode: "VND",
-    vnp_TxnRef: String(params.vnp_TxnRef).replace(/-/g, ""),
+    vnp_TxnRef: params.vnp_TxnRef,
     vnp_OrderInfo: String(params.vnp_OrderInfo).replace(/-/g, ""),
     vnp_OrderType: "other",
     vnp_Amount: Number(params.vnp_Amount),
