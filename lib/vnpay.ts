@@ -23,12 +23,13 @@ export function getVNPayConfig(): VNPayConfig {
   };
 }
 
-function sortObject(obj: Record<string, any>): Record<string, string> {
+function sortObject(obj: Record<string, string | number>): Record<string, string> {
+  const sortedKeys = Object.keys(obj).sort();
   const sorted: Record<string, string> = {};
-  const keys = Object.keys(obj).map(encodeURIComponent).sort();
 
-  for (const key of keys) {
-    const value = String(obj[key])
+  for (const key of sortedKeys) {
+    const value = String(obj[key]);
+
     sorted[key] = encodeURIComponent(value).replace(/%20/g, "+");
   }
 
@@ -59,63 +60,61 @@ function getExpireDate() {
 export function createVNPayUrl(params: Record<string, string | number>) {
   const config = getVNPayConfig();
 
-  const cleanOrderInfo = String(params.vnp_OrderInfo || "")
-    .replace(/-/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  let vnp_Params: Record<string, string | number> = {
+  const vnp_Params: Record<string, string | number> = {
     vnp_Version: "2.1.0",
     vnp_Command: "pay",
     vnp_TmnCode: config.vnp_TmnCode,
     vnp_Locale: "vn",
     vnp_CurrCode: "VND",
-    vnp_TxnRef: String(params.vnp_TxnRef || "").replace(/-/g, ""),
-    vnp_OrderInfo: cleanOrderInfo,
+    vnp_TxnRef: String(params.vnp_TxnRef).replace(/-/g, ""),
+    vnp_OrderInfo: String(params.vnp_OrderInfo).replace(/-/g, ""),
     vnp_OrderType: "other",
-    vnp_Amount: params.vnp_Amount,
+    vnp_Amount: Number(params.vnp_Amount),
     vnp_ReturnUrl: config.vnp_ReturnUrl,
-    vnp_IpAddr: params.vnp_IpAddr || "26.64.101.238",
-    vnp_CreateDate: params.vnp_CreateDate,
+    vnp_IpAddr: String(params.vnp_IpAddr || "127.0.0.1"),
+    vnp_CreateDate: params.vnp_CreateDate as string,
     vnp_ExpireDate: getExpireDate(),
   };
 
-  vnp_Params = sortObject(vnp_Params);
+  const sortedParams = sortObject(vnp_Params);
 
-  // ✨ stringify không encode lại nữa (để giữ dấu '+')
-  const signData = qs.stringify(vnp_Params);
+  const signData = Object.entries(sortedParams)
+    .map(([k, v]) => `${k}=${v}`)
+    .join("&");
 
-  const signed = crypto
+  const secureHash = crypto
     .createHmac("sha512", config.vnp_HashSecret)
-    .update(Buffer.from(signData, "utf-8"))
+    .update(signData, "utf8")
     .digest("hex");
 
-  vnp_Params['vnp_SecureHash'] = signed;
-  return `${config.vnp_Url}?${qs.stringify(vnp_Params)}`;
+  const paymentUrl =
+    `${config.vnp_Url}?${signData}&vnp_SecureHash=${secureHash}`;
+
+  return paymentUrl;
 }
 
 export function verifyVNPayResponse(responseParams: Record<string, string>): boolean {
   const config = getVNPayConfig();
 
   const secureHash = responseParams.vnp_SecureHash;
-  const vnp_Params: Record<string, string> = {};
+  const params: Record<string, string> = {};
 
   for (const key in responseParams) {
     if (key.startsWith("vnp_") && key !== "vnp_SecureHash") {
-      vnp_Params[key] = responseParams[key];
+      params[key] = responseParams[key];
     }
   }
 
-  const sortedParams = sortObject(vnp_Params);
+  const sortedParams = sortObject(params);
 
-  const orderedParams = qs.stringify(sortedParams, undefined, undefined, {
-    encodeURIComponent: (str) => str,
-  });
+  const signData = Object.entries(sortedParams)
+    .map(([k, v]) => `${k}=${v}`)
+    .join("&");
 
-  const hmac = crypto
+  const hash = crypto
     .createHmac("sha512", config.vnp_HashSecret)
-    .update(Buffer.from(orderedParams, "utf-8"))
+    .update(signData, "utf8")
     .digest("hex");
 
-  return hmac === secureHash;
+  return hash === secureHash;
 }
