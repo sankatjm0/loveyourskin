@@ -28,7 +28,7 @@ export function PaymentClient({ order }: PaymentClientProps) {
         .toISOString()
         .replace(/[-T:.Z]/g, "")
         .substring(0, 14)
-      const txnRef = `${order.id}-${createDate}`
+      const txnRef = `${order.id}`
       const amount = Math.round(order.total_amount * 100)
 
       const vnpayUrl = createVNPayUrl({

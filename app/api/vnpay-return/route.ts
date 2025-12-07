@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
     const supabase = await createClient()
     const responseCode = params.vnp_ResponseCode
     const txnRef = params.vnp_TxnRef
-    const [orderId] = txnRef.split("-")
+    const orderId = txnRef
 
     if (responseCode === "00") {
       // Update order
