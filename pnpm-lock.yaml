@@ -161,9 +161,6 @@ importers:
       sonner:
         specifier: ^1.7.4
         version: 1.7.4(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
-      supabase:
-        specifier: ^2.65.6
-        version: 2.65.6
       tailwind-merge:
         specifier: ^2.5.5
         version: 2.5.5
