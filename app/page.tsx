@@ -13,11 +13,13 @@ export default function Home() {
   const [user, setUser] = useState<any>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [featuredProducts, setFeaturedProducts] = useState<any[]>([])
+  const [bestSellers, setBestSellers] = useState<any[]>([])
   const router = useRouter()
 
   useEffect(() => {
     checkAuth()
     loadFeaturedProducts()
+    loadBestSellers()
   }, [])
 
   async function checkAuth() {
@@ -27,6 +29,66 @@ export default function Home() {
     } = await supabase.auth.getUser()
     setUser(user || null)
     setIsLoading(false)
+  }
+
+  async function getTopSellingProducts(limit = 4) {
+    const supabase = createClient()
+
+    const { data: topSelling, error: viewError } = await supabase
+      .from("product_sales_summary")
+      .select("id, total_sold")
+      .order("total_sold", { ascending: false })
+      .limit(limit)
+
+    if (viewError || !topSelling?.length) {
+      console.error("View error:", viewError)
+      return []
+    }
+
+    const productIds = topSelling.map((p) => p.id)
+
+    const { data: products, error: productsError } = await supabase
+      .from("products")
+      .select("*")
+      .in("id", productIds)
+
+    if (productsError || !products) {
+      console.error("Products error:", productsError)
+      return []
+    }
+
+    const merged = await Promise.all(
+      products.map(async (product) => {
+        const soldRecord = topSelling.find((p) => p.id === product.id)
+        const promo = await getActivePromotionForProduct(product.id)
+
+        const discountedPrice = promo
+          ? product.price * (1 - promo.discount_percent / 100)
+          : null
+
+        return {
+          ...product,
+          total_sold: soldRecord?.total_sold || 0,
+          discount_percent: promo?.discount_percent || 0,
+          discountedPrice,
+          isTopSelling: true,
+        }
+      })
+    )
+
+    return merged.sort(
+      (a, b) => (b.total_sold ?? 0) - (a.total_sold ?? 0)
+    )
+  }
+
+
+  async function loadBestSellers() {
+    try {
+      const products = await getTopSellingProducts(4)
+      setBestSellers(products)
+    } catch (err) {
+      console.error("Error loading best sellers:", err)
+    }
   }
 
   async function loadFeaturedProducts() {
@@ -108,6 +170,66 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      {/* Best Seller Section */}
+      <section className="max-w-7xl mx-auto px-4 py-16">
+        <h2 className="text-4xl font-bold mb-12 text-center">Best Sellers</h2>
+        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg grid md:grid-cols-2 lg:grid-cols-4 gap-8">
+          {bestSellers.map((product) => (
+            <Link
+              key={product.id}
+              href={`/products/${product.id}`}
+              className="group"
+            >
+              <div className="bg-muted rounded-lg overflow-hidden mb-4 aspect-square relative">
+                <img
+                  src={product.image_url || "/placeholder.svg"}
+                  alt={product.name}
+                  className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                />
+
+                {/* 🔥 TOP SELLING TAG */}
+                <div className="absolute top-2 left-2 bg-red-500 text-white px-3 py-1 rounded-full text-sm font-bold">
+                  Top Selling
+                </div>
+
+                {/* 🏷️ DISCOUNT TAG */}
+                {product.discount_percent > 0 && (
+                  <div className="absolute top-2 right-2 bg-red-500 text-white px-3 py-1 rounded-full text-sm font-bold">
+                    -{product.discount_percent}%
+                  </div>
+                )}
+              </div>
+
+              <h3 className="text-lg font-semibold mb-2 group-hover:text-primary transition">
+                {product.name}
+              </h3>
+
+              <p className="text-sm text-muted-foreground mb-2">
+                Sold: {product.total_sold}
+              </p>
+
+              <div className="flex flex-col gap-1">
+                {product.discountedPrice ? (
+                  <>
+                    <p className="text-sm line-through text-muted-foreground">
+                      {product.price} VND
+                    </p>
+                    <p className="text-primary font-bold text-lg">
+                      {product.discountedPrice.toFixed(0)} VND
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-primary font-bold">
+                    {product.price} VND
+                  </p>
+                )}
+              </div>
+            </Link>
+          ))}
+        </div>
+      </section>
+
 
       {/* Featured Products - Top Sales */}
       <section className="max-w-7xl mx-auto px-4 py-16">
