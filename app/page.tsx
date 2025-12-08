@@ -83,11 +83,10 @@ export default function Home() {
         <div className="grid md:grid-cols-2 gap-12 items-center">
           <div>
             <h1 className="text-5xl md:text-6xl font-bold leading-tight mb-6 text-balance">
-              Optimal organization meets exquisite design
+              Where scent becomes your signature
             </h1>
             <p className="text-lg text-muted-foreground mb-8 leading-relaxed">
-              Transform your space with carefully curated, premium products that combine functional excellence with
-              timeless aesthetics.
+              Authentic perfumes, carefully selected for quality, longevity, and character. Enjoy exclusive deals, fast shipping, and secure payments.
             </p>
             <div className="flex gap-4">
               <Link

@@ -95,7 +95,7 @@ export default function Footer() {
 
         {/* Bottom Footer */}
         <div className="flex flex-col md:flex-row justify-between items-center text-sm text-muted-foreground">
-          <p>&copy; {currentYear} LoveYourSkin. All rights reserved.</p>
+          <p>&copy; {currentYear} LoveYourScent. All rights reserved.</p>
         </div>
       </div>
     </footer>
