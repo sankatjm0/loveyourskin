@@ -19,10 +19,10 @@ export default function Footer() {
               Premium perfume for everyone. Care for your smell, love yourself.
             </p>
             <div className="flex gap-4">
-              <a href="https://facebook.com/kdiemmm" className="text-muted-foreground hover:text-primary transition">
+              <a href="https://facebook.com/kdiemmm" target="_blank" className="text-muted-foreground hover:text-primary transition">
                 Facebook
               </a>
-              <a href="https://instagram.com/sankatjm0" className="text-muted-foreground hover:text-primary transition">
+              <a href="https://instagram.com/sankatjm0" target="_blank" className="text-muted-foreground hover:text-primary transition">
                 Instagram
               </a>
             </div>

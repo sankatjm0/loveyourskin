@@ -4,6 +4,7 @@ import Link from "next/link"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { redirect } from "next/navigation"
+import { CancelOrderButton } from "@/components/CancelOrderButton"
 
 export default async function OrderDetailPage({
   params,
@@ -107,6 +108,9 @@ export default async function OrderDetailPage({
                   </div>
                 </div>
               </div>
+              {["pending", "confirmed"].includes(order.status) && (
+                <CancelOrderButton orderId={order.id} />
+              )}
             </CardContent>
           </Card>
 
