@@ -42,8 +42,7 @@ export default function SignUpPage() {
       // Notify admins of new user registration via server action
       await notifyNewUserSignup(email)
       
-      router.push("/")
-      router.refresh()
+      router.push("/auth/sign-up-success")
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : "Sign up failed")
     } finally {
